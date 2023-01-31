@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option go_package = "github.com/mrjrieke/cap";
+
+package cap;
+
+// The mashup service definition.
+service Cap {
+  rpc Pense(PenseRequest) returns (PenseReply) {}
+}
+
+message PenseRequest {
+  string pense = 1;
+  string penseIndex = 2;
+}
+
+message PenseReply {
+  string pense = 1;
+}

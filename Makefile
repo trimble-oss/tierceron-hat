@@ -16,12 +16,16 @@ depend:
 clean:
 	rm -f bin
 
-brimcrown: */*.go
+brim: */*.go
 	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/brim" -ldflags="$(LD_FLAGS)" $(ROOT)/brim/brim.go
-	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/crown" -ldflags="$(LD_FLAGS)" $(ROOT)/crown/crown.go
+	chmod 700 $(ROOT)/bin/brim
 
-cleanmsdk:
-	rm mashupsdk/mashupsdk_grpc.pb.go; rm mashupsdk/mashupsdk.pb.go
+crown: */*.go
+	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/crown" -ldflags="$(LD_FLAGS)" $(ROOT)/crown/main.go
+	chmod 700 $(ROOT)/bin/crown
 
-mashupsdk: */*.proto
-	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative mashupsdk/mashupsdk.proto
+cleangrpc:
+	rm cap/cap_grpc.pb.go; rm cap/cap.pb.go
+
+capgrpc: */*.proto
+	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative cap/cap.proto
