@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,7 +19,7 @@ import (
 )
 
 var penseCodeMap map[string]string = map[string]string{}
-var penseMap map[string]string = map[string]string{}
+var penseMemoryMap map[string]string = map[string]string{}
 
 const penseSocket = "./snap.sock"
 
@@ -45,6 +46,15 @@ func Tap(target string, expectedSha256 string) error {
 	if err != nil {
 		return err
 	}
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	go func(c chan os.Signal) {
+		<-c
+		listener.Close()
+		os.Exit(0)
+	}(signalChan)
 
 	for {
 		conn, err := listener.Accept()
@@ -141,6 +151,10 @@ func TapWriter(pense string) error {
 	return penseResponseErr
 }
 
+func TapMemorize(penseIndex, memory string) {
+	penseMemoryMap[penseIndex] = memory
+}
+
 type penseServer struct {
 	UnimplementedCapServer
 }
@@ -150,8 +164,9 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 	penseArray := sha256.Sum256([]byte(penseRequest.Pense))
 	penseCode := hex.EncodeToString(penseArray[:])
 	if _, penseCodeOk := penseCodeMap[penseCode]; penseCodeOk {
+		delete(penseCodeMap, penseCode)
 
-		if pense, penseOk := penseMap[penseRequest.PenseIndex]; penseOk {
+		if pense, penseOk := penseMemoryMap[penseRequest.PenseIndex]; penseOk {
 			return &PenseReply{Pense: pense}, nil
 		} else {
 			return &PenseReply{Pense: "Pense undefined"}, nil

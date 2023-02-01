@@ -13,7 +13,10 @@ func main() {
 		os.Exit(-1)
 	}
 	brimPath := strings.Replace(exePath, "/crown", "/brim", 1)
-	go cap.Tap(brimPath, "f634bed34ba6bb6a198187705e38cd58d64972c14586608b93acaa6f84cd4e38")
-	cap.TapServer("127.0.0.1:1534")
+	go cap.Tap(brimPath, "0904d372b7e10f44c7ea99b674d9ec19f7d2576a9d1e49c9530b37c45dd3eee6")
 
+	cap.TapMemorize("I think", "therefore I am.")
+	cap.TapMemorize("It is not enough to have a good mind.", "The main thing is to use it well.")
+
+	cap.TapServer("127.0.0.1:1534")
 }
