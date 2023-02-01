@@ -1,7 +1,6 @@
 package cap
 
 import (
-	"bytes"
 	context "context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,16 +8,18 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 	grpc "google.golang.org/grpc"
 )
 
 var penseCodeMap map[string]string = map[string]string{}
-var penseMap map[string]string = map[string]string{}
+var penseMemoryMap map[string]string = map[string]string{}
 
 const penseSocket = "./snap.sock"
 
@@ -46,6 +47,15 @@ func Tap(target string, expectedSha256 string) error {
 		return err
 	}
 
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	go func(c chan os.Signal) {
+		<-c
+		listener.Close()
+		os.Exit(0)
+	}(signalChan)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -65,12 +75,17 @@ func Tap(target string, expectedSha256 string) error {
 			}
 
 			var cred *unix.Ucred
+			var credErr error
 
 			sysConn.Control(func(fd uintptr) {
-				cred, err = unix.GetsockoptUcred(int(fd),
+				cred, credErr = unix.GetsockoptUcred(int(fd),
 					unix.SOL_SOCKET,
 					unix.SO_PEERCRED)
 			})
+			if credErr != nil {
+				conn.Close()
+				continue
+			}
 
 			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
 			if linkErr != nil {
@@ -81,33 +96,42 @@ func Tap(target string, expectedSha256 string) error {
 
 			// 2nd check.
 			if path == target {
-
 				// 3rd check.
-				targetFile, err := os.Open(path)
+				peerExe, err := os.Open(path)
 				if err != nil {
+					conn.Close()
 					continue
 				}
-				defer targetFile.Close()
+				defer peerExe.Close()
 
 				h := sha256.New()
-				if _, err := io.Copy(h, targetFile); err != nil {
+				if _, err := io.Copy(h, peerExe); err != nil {
+					conn.Close()
 					continue
 				}
 
 				if expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
-					go func(c net.Conn) {
-						buff := &bytes.Buffer{}
-						io.Copy(conn, buff)
-						if buff.Len() == 32 {
-							penseCodeMap[buff.String()] = ""
-						}
-						buff.Reset()
+					messageBytes := make([]byte, 64)
 
-					}(conn)
+					err := sysConn.Read(func(s uintptr) bool {
+						_, operr := syscall.Read(int(s), messageBytes)
+						return operr != syscall.EAGAIN
+					})
+					if err != nil {
+						conn.Close()
+						continue
+					}
+					message := string(messageBytes)
+
+					if len(message) == 64 {
+						penseCodeMap[message] = ""
+					}
 				}
+
 			}
 
 		}
+		conn.Close()
 	}
 }
 
@@ -117,6 +141,7 @@ func TapWriter(pense string) error {
 		return penseErr
 	}
 	_, penseWriteErr := penseConn.Write([]byte(pense))
+	defer penseConn.Close()
 	if penseWriteErr != nil {
 		return penseWriteErr
 	}
@@ -124,6 +149,10 @@ func TapWriter(pense string) error {
 	_, penseResponseErr := io.ReadAll(penseConn)
 
 	return penseResponseErr
+}
+
+func TapMemorize(penseIndex, memory string) {
+	penseMemoryMap[penseIndex] = memory
 }
 
 type penseServer struct {
@@ -135,8 +164,9 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 	penseArray := sha256.Sum256([]byte(penseRequest.Pense))
 	penseCode := hex.EncodeToString(penseArray[:])
 	if _, penseCodeOk := penseCodeMap[penseCode]; penseCodeOk {
+		delete(penseCodeMap, penseCode)
 
-		if pense, penseOk := penseMap[penseRequest.PenseIndex]; penseOk {
+		if pense, penseOk := penseMemoryMap[penseRequest.PenseIndex]; penseOk {
 			return &PenseReply{Pense: pense}, nil
 		} else {
 			return &PenseReply{Pense: "Pense undefined"}, nil
