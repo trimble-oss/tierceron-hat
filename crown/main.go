@@ -2,20 +2,18 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/mrjrieke/hat/cap"
 )
 
 func main() {
-	ex, err := os.Executable()
-	if err != nil {
+	exePath, exePathErr := os.Readlink("/proc/self/exe")
+	if exePathErr != nil {
 		os.Exit(-1)
 	}
-	exePath := filepath.Dir(ex)
 	brimPath := strings.Replace(exePath, "/crown", "/brim", 1)
-	go cap.Tap(brimPath, "76b2e62226ea89a690808afa60f9062f43e2c6c21b5c436e7c6e6d136aa0715d")
+	go cap.Tap(brimPath, "f634bed34ba6bb6a198187705e38cd58d64972c14586608b93acaa6f84cd4e38")
 	cap.TapServer("127.0.0.1:1534")
 
 }
