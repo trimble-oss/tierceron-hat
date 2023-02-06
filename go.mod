@@ -1,4 +1,4 @@
-module github.com/mrjrieke/hat
+module github.com/trimble-oss/tierceron-hat
 
 go 1.19
 
