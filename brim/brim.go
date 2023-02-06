@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/mrjrieke/hat/cap"
+	"github.com/trimble-oss/tierceron-hat/cap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

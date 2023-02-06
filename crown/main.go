@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mrjrieke/hat/cap"
+	"github.com/trimble-oss/tierceron-hat/cap"
 )
 
 func main() {
