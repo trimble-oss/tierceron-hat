@@ -21,7 +21,7 @@ import (
 var penseCodeMap map[string]string = map[string]string{}
 var penseMemoryMap map[string]string = map[string]string{}
 
-const penseSocket = "./snap.sock"
+const penseSocket = "/tmp/trccarrier/trcsnap.sock"
 
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
@@ -42,19 +42,28 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 }
 
 func Tap(target string, expectedSha256 string) error {
-	listener, err := net.Listen("unix", penseSocket)
+	// Tap always starts with a clean slate.
+	err := os.MkdirAll("/tmp/trccarrier/", 0700)
 	if err != nil {
 		return err
 	}
-
+	os.Remove(penseSocket)
+	listener, err := net.Listen("unix", penseSocket)
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGABRT)
 
 	go func(c chan os.Signal) {
 		<-c
-		listener.Close()
+		if listener != nil {
+			listener.Close()
+		}
+		os.Remove(penseSocket)
 		os.Exit(0)
 	}(signalChan)
+
+	if err != nil {
+		return err
+	}
 
 	for {
 		conn, err := listener.Accept()
