@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,12 +42,21 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	}
 }
 
-func Tap(target string, expectedSha256 string) error {
+func Tap(target string, expectedSha256 string, group string) error {
 	// Tap always starts with a clean slate.
-	err := os.MkdirAll("/tmp/trccarrier/", 0700)
+	err := os.MkdirAll("/tmp/trccarrier/", 0770)
 	if err != nil {
 		return err
 	}
+	azureDeployGroup, azureDeployGroupErr := user.LookupGroup(group)
+	if azureDeployGroupErr != nil {
+		return azureDeployGroupErr
+	}
+	azureDeployGID, azureGIDConvErr := strconv.Atoi(azureDeployGroup.Gid)
+	if azureGIDConvErr != nil {
+		return azureGIDConvErr
+	}
+	os.Chown("/tmp/trccarrier/", -1, azureDeployGID)
 	os.Remove(penseSocket)
 	listener, err := net.Listen("unix", penseSocket)
 	signalChan := make(chan os.Signal, 1)
@@ -192,7 +202,7 @@ func main() {
 	}
 	exePath := filepath.Dir(ex)
 	brimPath := strings.Replace(exePath, "/Cap", "/brim", 1)
-	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5")
+	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5", "")
 	TapServer("127.0.0.1:1534")
 
 }
