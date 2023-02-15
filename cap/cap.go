@@ -4,6 +4,7 @@ import (
 	context "context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -22,7 +23,8 @@ import (
 var penseCodeMap map[string]string = map[string]string{}
 var penseMemoryMap map[string]string = map[string]string{}
 
-const penseSocket = "/tmp/trccarrier/trcsnap.sock"
+const penseSocket = "trcsnap.sock"
+const penseDir = "/tmp/trccarrier/"
 
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
@@ -42,23 +44,29 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	}
 }
 
-func Tap(target string, expectedSha256 string, group string) error {
+func Tap(target string, expectedSha256 string, group string, skipPathControls bool) error {
 	// Tap always starts with a clean slate.
-	err := os.MkdirAll("/tmp/trccarrier/", 0770)
+	err := os.MkdirAll(penseDir, 0770)
 	if err != nil {
-		return err
+		return errors.Join(errors.New("Dir create error"), err)
 	}
 	azureDeployGroup, azureDeployGroupErr := user.LookupGroup(group)
 	if azureDeployGroupErr != nil {
-		return azureDeployGroupErr
+		return errors.Join(errors.New("Group lookup failure"), azureDeployGroupErr)
 	}
 	azureDeployGID, azureGIDConvErr := strconv.Atoi(azureDeployGroup.Gid)
 	if azureGIDConvErr != nil {
-		return azureGIDConvErr
+		return errors.Join(errors.New("Group ID lookup failure"), azureGIDConvErr)
 	}
-	os.Chown("/tmp/trccarrier/", -1, azureDeployGID)
-	os.Remove(penseSocket)
-	listener, err := net.Listen("unix", penseSocket)
+	os.Chown(penseDir, -1, azureDeployGID)
+	os.Chmod(penseDir, 0770)
+	os.Remove(penseDir + penseSocket)
+	origUmask := syscall.Umask(0777)
+	listener, listenErr := net.Listen("unix", penseDir+penseSocket)
+	syscall.Umask(origUmask)
+	os.Chown(penseDir+penseSocket, -1, azureDeployGID)
+	os.Chmod(penseDir+penseSocket, 0770)
+
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGABRT)
 
@@ -67,28 +75,27 @@ func Tap(target string, expectedSha256 string, group string) error {
 		if listener != nil {
 			listener.Close()
 		}
-		os.Remove(penseSocket)
+		os.Remove(penseDir + penseSocket)
 		os.Exit(0)
 	}(signalChan)
 
 	if err != nil {
-		return err
+		return errors.Join(errors.New("Listen error"), listenErr)
 	}
 
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
 			if conn != nil {
 				conn.Close()
 			}
-			return err
+			return errors.Join(errors.New("Accept error"), acceptErr)
 		}
 
 		// 1st check.
 		if conn.RemoteAddr().Network() == conn.LocalAddr().Network() {
-
 			sysConn, sysConnErr := conn.(*net.UnixConn).SyscallConn()
-			if sysConnErr != nil {
+			if !skipPathControls && sysConnErr != nil {
 				conn.Close()
 				continue
 			}
@@ -101,35 +108,35 @@ func Tap(target string, expectedSha256 string, group string) error {
 					unix.SOL_SOCKET,
 					unix.SO_PEERCRED)
 			})
-			if credErr != nil {
+			if !skipPathControls && credErr != nil {
 				conn.Close()
 				continue
 			}
 
 			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
-			if linkErr != nil {
+
+			if !skipPathControls && linkErr != nil {
 				conn.Close()
 				continue
 			}
-			defer conn.Close()
 
 			// 2nd check.
-			if path == target {
+			if skipPathControls || path == target {
 				// 3rd check.
 				peerExe, err := os.Open(path)
-				if err != nil {
+				if !skipPathControls && err != nil {
 					conn.Close()
 					continue
 				}
 				defer peerExe.Close()
 
 				h := sha256.New()
-				if _, err := io.Copy(h, peerExe); err != nil {
+				if _, err := io.Copy(h, peerExe); !skipPathControls && err != nil {
 					conn.Close()
 					continue
 				}
 
-				if expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
+				if skipPathControls || expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
 					messageBytes := make([]byte, 64)
 
 					err := sysConn.Read(func(s uintptr) bool {
@@ -155,7 +162,7 @@ func Tap(target string, expectedSha256 string, group string) error {
 }
 
 func TapWriter(pense string) error {
-	penseConn, penseErr := net.Dial("unix", penseSocket)
+	penseConn, penseErr := net.Dial("unix", penseDir+penseSocket)
 	if penseErr != nil {
 		return penseErr
 	}
@@ -202,7 +209,7 @@ func main() {
 	}
 	exePath := filepath.Dir(ex)
 	brimPath := strings.Replace(exePath, "/Cap", "/brim", 1)
-	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5", "")
+	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5", "", false)
 	TapServer("127.0.0.1:1534")
 
 }
