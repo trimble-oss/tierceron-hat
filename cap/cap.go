@@ -2,6 +2,7 @@ package cap
 
 import (
 	context "context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -14,6 +15,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/lafriks/go-shamir"
+	"github.com/xtaci/kcp-go/v5"
+	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/sys/unix"
 	grpc "google.golang.org/grpc"
 )
@@ -38,6 +42,71 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	log.Printf("server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
+var clientCodeMap map[string][][]byte = map[string][][]byte{}
+
+func handleMessage(handshakeCode string, conn *kcp.UDPSession) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buf)
+		if _, ok := clientCodeMap[conn.RemoteAddr().String()]; !ok {
+			clientCodeMap[conn.RemoteAddr().String()] = [][]byte{}
+		}
+
+		if err != nil {
+			// All done... hopefully.
+			if _, ok := clientCodeMap[conn.RemoteAddr().String()]; ok {
+				messageBytes, err := shamir.Combine(clientCodeMap[conn.RemoteAddr().String()]...)
+				if err == nil {
+					message := string(messageBytes)
+					messageParts := strings.Split(message, ":")
+					if messageParts[0] == handshakeCode {
+						if len(messageParts[1]) == 64 {
+							penseCodeMap[messageParts[1]] = ""
+						}
+					}
+				}
+			}
+			conn.Write([]byte(" "))
+			defer conn.Close()
+			return
+		} else {
+			if len(clientCodeMap[conn.RemoteAddr().String()]) > 0 {
+				if _, ok := clientCodeMap[conn.RemoteAddr().String()]; ok {
+					messageBytes, err := shamir.Combine(clientCodeMap[conn.RemoteAddr().String()]...)
+					if err == nil {
+						message := string(messageBytes)
+						messageParts := strings.Split(message, ":")
+						if messageParts[0] == handshakeCode {
+							if len(messageParts[1]) == 64 {
+								clientCodeMap[conn.RemoteAddr().String()] = [][]byte{}
+								penseCodeMap[messageParts[1]] = ""
+								conn.Write([]byte(" "))
+								defer conn.Close()
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+		clientCodeMap[conn.RemoteAddr().String()] = append(clientCodeMap[conn.RemoteAddr().String()], append([]byte{}, buf[:n]...))
+	}
+}
+
+func Feather(encryptPass string, encryptSalt string, port string, handshakeCode string) {
+	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
+	block, _ := kcp.NewAESBlockCrypt(key)
+	if listener, err := kcp.ListenWithOptions("127.0.0.1:"+port, block, 10, 3); err == nil {
+		for {
+			s, err := listener.AcceptKCP()
+			if err != nil {
+				log.Fatal(err)
+			}
+			go handleMessage(handshakeCode, s)
+		}
 	}
 }
 
@@ -147,6 +216,32 @@ func TapWriter(pense string) error {
 	}
 
 	_, penseResponseErr := io.ReadAll(penseConn)
+
+	return penseResponseErr
+}
+
+func FeatherWriter(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, pense string) error {
+	penseSplits, err := shamir.Split([]byte(handshakeCode+":"+pense), 12, 11)
+	if err != nil {
+		return err
+	}
+	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
+	block, _ := kcp.NewAESBlockCrypt(key)
+
+	penseConn, penseErr := kcp.DialWithOptions(hostAddr, block, 10, 3)
+	if penseErr != nil {
+		return penseErr
+	}
+	defer penseConn.Close()
+	for _, penseBlock := range penseSplits {
+		_, penseWriteErr := penseConn.Write(penseBlock)
+		if penseWriteErr != nil {
+			return penseWriteErr
+		}
+	}
+
+	responseBuf := []byte{1}
+	_, penseResponseErr := io.ReadFull(penseConn, responseBuf)
 
 	return penseResponseErr
 }
