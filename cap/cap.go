@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/lafriks/go-shamir"
 	"github.com/xtaci/kcp-go/v5"
@@ -50,12 +51,13 @@ var clientCodeMap map[string][][]byte = map[string][][]byte{}
 func handleMessage(handshakeCode string, conn *kcp.UDPSession) {
 	buf := make([]byte, 4096)
 	for {
+		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
 		if _, ok := clientCodeMap[conn.RemoteAddr().String()]; !ok {
 			clientCodeMap[conn.RemoteAddr().String()] = [][]byte{}
 		}
 
-		if err != nil {
+		if n == 0 || err != nil {
 			// All done... hopefully.
 			if _, ok := clientCodeMap[conn.RemoteAddr().String()]; ok {
 				messageBytes, err := shamir.Combine(clientCodeMap[conn.RemoteAddr().String()]...)
@@ -72,25 +74,6 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession) {
 			conn.Write([]byte(" "))
 			defer conn.Close()
 			return
-		} else {
-			if len(clientCodeMap[conn.RemoteAddr().String()]) > 0 {
-				if _, ok := clientCodeMap[conn.RemoteAddr().String()]; ok {
-					messageBytes, err := shamir.Combine(clientCodeMap[conn.RemoteAddr().String()]...)
-					if err == nil {
-						message := string(messageBytes)
-						messageParts := strings.Split(message, ":")
-						if messageParts[0] == handshakeCode {
-							if len(messageParts[1]) == 64 {
-								clientCodeMap[conn.RemoteAddr().String()] = [][]byte{}
-								penseCodeMap[messageParts[1]] = ""
-								conn.Write([]byte(" "))
-								defer conn.Close()
-								return
-							}
-						}
-					}
-				}
-			}
 		}
 		clientCodeMap[conn.RemoteAddr().String()] = append(clientCodeMap[conn.RemoteAddr().String()], append([]byte{}, buf[:n]...))
 	}
@@ -221,7 +204,7 @@ func TapWriter(pense string) error {
 }
 
 func FeatherWriter(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, pense string) error {
-	penseSplits, err := shamir.Split([]byte(handshakeCode+":"+pense), 12, 11)
+	penseSplits, err := shamir.Split([]byte(handshakeCode+":"+pense), 12, 7)
 	if err != nil {
 		return err
 	}
