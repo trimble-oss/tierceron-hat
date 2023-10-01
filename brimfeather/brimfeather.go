@@ -59,4 +59,5 @@ func penseQuery(pense string) {
 func main() {
 	penseQuery("I think")
 	penseQuery("It is not enough to have a good mind.")
+	penseQuery("Ponder")
 }

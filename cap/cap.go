@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -25,6 +26,9 @@ import (
 
 var penseCodeMap map[string]string = map[string]string{}
 var penseMemoryMap map[string]string = map[string]string{}
+
+var penseFeatherCodeMap map[string]string = map[string]string{}
+var penseFeatherMemoryMap map[string]string = map[string]string{}
 
 const penseSocket = "./snap.sock"
 
@@ -66,7 +70,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession) {
 					messageParts := strings.Split(message, ":")
 					if messageParts[0] == handshakeCode {
 						if len(messageParts[1]) == 64 {
-							penseCodeMap[messageParts[1]] = ""
+							penseFeatherCodeMap[messageParts[1]] = ""
 						}
 					}
 				}
@@ -229,6 +233,11 @@ func FeatherWriter(encryptPass string, encryptSalt string, hostAddr string, hand
 	return penseResponseErr
 }
 
+func TapFeather(penseIndex, memory string) {
+	penseMemoryMap[penseIndex] = memory
+	penseFeatherMemoryMap[penseIndex] = memory
+}
+
 func TapMemorize(penseIndex, memory string) {
 	penseMemoryMap[penseIndex] = memory
 }
@@ -250,6 +259,16 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 			return &PenseReply{Pense: "Pense undefined"}, nil
 		}
 	} else {
+		// Might be a feather
+		if _, penseCodeOk := penseFeatherCodeMap[penseCode]; penseCodeOk {
+			delete(penseFeatherCodeMap, penseCode)
+			fmt.Println("Feathering...")
+			if pense, penseOk := penseFeatherMemoryMap[penseRequest.PenseIndex]; penseOk {
+				return &PenseReply{Pense: pense}, nil
+			} else {
+				return &PenseReply{Pense: "Pense undefined"}, nil
+			}
+		}
 		return &PenseReply{Pense: "...."}, nil
 	}
 }
