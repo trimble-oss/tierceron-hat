@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -266,7 +265,6 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 		// Might be a feather
 		if _, penseCodeOk := penseFeatherCodeMap[penseCode]; penseCodeOk {
 			delete(penseFeatherCodeMap, penseCode)
-			fmt.Println("Feathering...")
 			if pense, penseOk := penseFeatherMemoryMap[penseRequest.PenseIndex]; penseOk {
 				return &PenseReply{Pense: pense}, nil
 			} else {
