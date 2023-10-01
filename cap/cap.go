@@ -83,7 +83,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession) {
 	}
 }
 
-func Feather(encryptPass string, encryptSalt string, port string, handshakeCode string) {
+func Feather(encryptPass string, encryptSalt string, port string, handshakeCode string, acceptRemote func(string) bool) {
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 	if listener, err := kcp.ListenWithOptions("127.0.0.1:"+port, block, 10, 3); err == nil {
@@ -92,7 +92,11 @@ func Feather(encryptPass string, encryptSalt string, port string, handshakeCode 
 			if err != nil {
 				log.Fatal(err)
 			}
-			go handleMessage(handshakeCode, s)
+			if acceptRemote(s.RemoteAddr().String()) {
+				go handleMessage(handshakeCode, s)
+			} else {
+				s.Close()
+			}
 		}
 	}
 }
