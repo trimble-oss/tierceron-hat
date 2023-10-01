@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -85,8 +84,8 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 				} else {
 					if acceptRemote(FEATHER_CTL, conn.RemoteAddr().String()) {
 						messageBytes = clientCodeMap[conn.RemoteAddr().String()][0]
+						clientCodeMap[conn.RemoteAddr().String()][0] = []byte{}
 						message := string(messageBytes)
-						fmt.Printf("Received message: %s\n", message)
 						messageParts := strings.Split(message, ":")
 						if messageParts[0] == handshakeCode {
 							// handshake:featherctl:
@@ -125,8 +124,9 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 			conn.Write([]byte(" "))
 			defer conn.Close()
 			return
+		} else {
+			clientCodeMap[conn.RemoteAddr().String()] = append(clientCodeMap[conn.RemoteAddr().String()], append([]byte{}, buf[:n]...))
 		}
-		clientCodeMap[conn.RemoteAddr().String()] = append(clientCodeMap[conn.RemoteAddr().String()], append([]byte{}, buf[:n]...))
 	}
 }
 
@@ -267,7 +267,6 @@ func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, han
 		return "", penseErr
 	}
 	defer penseConn.Close()
-	fmt.Println("Emitting: " + handshakeCode + ":featherctl:" + mode + ":" + pense)
 	_, penseWriteErr := penseConn.Write([]byte(handshakeCode + ":featherctl:" + mode + ":" + pense))
 	if penseWriteErr != nil {
 		return "", penseWriteErr

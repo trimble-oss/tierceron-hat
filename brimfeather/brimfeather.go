@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -32,7 +33,7 @@ func penseQuery(pense string) {
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
 
-	featherErr := cap.FeatherWriter("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", penseSum)
+	_, featherErr := cap.FeatherWriter("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", penseSum)
 	if featherErr != nil {
 		log.Fatalf("Failed to feather writer: %v", featherErr)
 	}
@@ -57,7 +58,14 @@ func penseQuery(pense string) {
 }
 
 func main() {
-	penseQuery("I think")
-	penseQuery("It is not enough to have a good mind.")
-	penseQuery("Ponder")
+	for {
+		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_GLIDE, "HelloWorld"); featherErr == nil && featherMode == cap.MODE_FEATHER {
+			penseQuery("I think")
+			penseQuery("It is not enough to have a good mind.")
+			penseQuery("Ponder")
+		} else {
+			fmt.Println("Waiting...")
+			time.Sleep(1 * time.Second)
+		}
+	}
 }

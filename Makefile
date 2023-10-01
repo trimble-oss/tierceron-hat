@@ -24,6 +24,10 @@ brimfeather: */*.go
 	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/brimfeather" -ldflags="$(LD_FLAGS)" $(ROOT)/brimfeather/brimfeather.go
 	chmod 700 $(ROOT)/bin/brimfeather
 
+captip: */*.go
+	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/tipcap" -ldflags="$(LD_FLAGS)" $(ROOT)/captip/captip.go
+	chmod 700 $(ROOT)/bin/tipcap
+
 crown: */*.go
 	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/crown" -ldflags="$(LD_FLAGS)" $(ROOT)/crown/main.go
 	chmod 700 $(ROOT)/bin/crown
