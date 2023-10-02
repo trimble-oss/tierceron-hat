@@ -10,11 +10,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"errors"
 
 	"github.com/lafriks/go-shamir"
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -43,7 +46,8 @@ var penseFeatherMemoryMap map[string]string = map[string]string{}
 
 var penseFeatherCtlCodeMap = cmap.New[string]()
 
-const penseSocket = "./snap.sock"
+const penseSocket = "trcsnap.sock"
+const penseDir = "/tmp/trccarrier/"
 
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
@@ -148,35 +152,58 @@ func Feather(encryptPass string, encryptSalt string, port string, handshakeCode 
 	}
 }
 
-func Tap(target string, expectedSha256 string) error {
-	listener, err := net.Listen("unix", penseSocket)
+func Tap(target string, expectedSha256 string, group string, skipPathControls bool) error {
+	// Tap always starts with a clean slate.
+	err := os.MkdirAll(penseDir, 0770)
 	if err != nil {
-		return err
+		return errors.Join(errors.New("Dir create error"), err)
 	}
+	azureDeployGroup, azureDeployGroupErr := user.LookupGroup(group)
+	if azureDeployGroupErr != nil {
+		return errors.Join(errors.New("Group lookup failure"), azureDeployGroupErr)
+	}
+	azureDeployGID, azureGIDConvErr := strconv.Atoi(azureDeployGroup.Gid)
+	if azureGIDConvErr != nil {
+		return errors.Join(errors.New("Group ID lookup failure"), azureGIDConvErr)
+	}
+	os.Chown(penseDir, -1, azureDeployGID)
+	os.Chmod(penseDir, 0770)
+	os.Remove(penseDir + penseSocket)
+	origUmask := syscall.Umask(0777)
+	listener, listenErr := net.Listen("unix", penseDir+penseSocket)
+	syscall.Umask(origUmask)
+	os.Chown(penseDir+penseSocket, -1, azureDeployGID)
+	os.Chmod(penseDir+penseSocket, 0770)
 
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGABRT)
 
 	go func(c chan os.Signal) {
 		<-c
-		listener.Close()
+		if listener != nil {
+			listener.Close()
+		}
+		os.Remove(penseDir + penseSocket)
 		os.Exit(0)
 	}(signalChan)
 
+	if err != nil {
+		return errors.Join(errors.New("Listen error"), listenErr)
+	}
+
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
 			if conn != nil {
 				conn.Close()
 			}
-			return err
+			return errors.Join(errors.New("Accept error"), acceptErr)
 		}
 
 		// 1st check.
 		if conn.RemoteAddr().Network() == conn.LocalAddr().Network() {
-
 			sysConn, sysConnErr := conn.(*net.UnixConn).SyscallConn()
-			if sysConnErr != nil {
+			if !skipPathControls && sysConnErr != nil {
 				conn.Close()
 				continue
 			}
@@ -189,35 +216,35 @@ func Tap(target string, expectedSha256 string) error {
 					unix.SOL_SOCKET,
 					unix.SO_PEERCRED)
 			})
-			if credErr != nil {
+			if !skipPathControls && credErr != nil {
 				conn.Close()
 				continue
 			}
 
 			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
-			if linkErr != nil {
+
+			if !skipPathControls && linkErr != nil {
 				conn.Close()
 				continue
 			}
-			defer conn.Close()
 
 			// 2nd check.
-			if path == target {
+			if skipPathControls || path == target {
 				// 3rd check.
 				peerExe, err := os.Open(path)
-				if err != nil {
+				if !skipPathControls && err != nil {
 					conn.Close()
 					continue
 				}
 				defer peerExe.Close()
 
 				h := sha256.New()
-				if _, err := io.Copy(h, peerExe); err != nil {
+				if _, err := io.Copy(h, peerExe); !skipPathControls && err != nil {
 					conn.Close()
 					continue
 				}
 
-				if expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
+				if skipPathControls || expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
 					messageBytes := make([]byte, 64)
 
 					err := sysConn.Read(func(s uintptr) bool {
@@ -350,7 +377,7 @@ func main() {
 	}
 	exePath := filepath.Dir(ex)
 	brimPath := strings.Replace(exePath, "/Cap", "/brim", 1)
-	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5")
+	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5", "", false)
 	TapServer("127.0.0.1:1534")
 
 }
