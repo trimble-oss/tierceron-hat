@@ -20,9 +20,21 @@ brim: */*.go
 	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/brim" -ldflags="$(LD_FLAGS)" $(ROOT)/brim/brim.go
 	chmod 700 $(ROOT)/bin/brim
 
+brimfeather: */*.go
+	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/brimfeather" -ldflags="$(LD_FLAGS)" $(ROOT)/brimfeather/brimfeather.go
+	chmod 700 $(ROOT)/bin/brimfeather
+
+captip: */*.go
+	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/tipcap" -ldflags="$(LD_FLAGS)" $(ROOT)/captip/captip.go
+	chmod 700 $(ROOT)/bin/tipcap
+
 crown: */*.go
 	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/crown" -ldflags="$(LD_FLAGS)" $(ROOT)/crown/main.go
 	chmod 700 $(ROOT)/bin/crown
+
+tiara: */*.go
+	$(GO_VARS) $(GO) build -tags "" -o="$(ROOT)/bin/tiara" -ldflags="$(LD_FLAGS)" $(ROOT)/tiara/main.go
+	chmod 700 $(ROOT)/bin/tiara
 
 cleangrpc:
 	rm cap/cap_grpc.pb.go; rm cap/cap.pb.go
