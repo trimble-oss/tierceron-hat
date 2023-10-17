@@ -270,7 +270,7 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 }
 
 func TapWriter(pense string) error {
-	penseConn, penseErr := net.Dial("unix", penseSocket)
+	penseConn, penseErr := net.Dial("unix", penseDir+penseSocket)
 	if penseErr != nil {
 		return penseErr
 	}
