@@ -1,15 +1,42 @@
 package main
 
 import (
-	"log"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/mrjrieke/hat/cap"
 )
 
 func featherCtl(pense string) {
-	_, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FEATHER, pense)
-	if featherErr != nil {
-		log.Fatalf("Failed to feather ctl emit: %v", featherErr)
+	flapMode := cap.MODE_FLAP
+	ctlFlapMode := flapMode
+	var err error = errors.New("init")
+
+	for {
+		if err == nil && ctlFlapMode == cap.MODE_PERCH {
+			break
+		} else {
+			callFlap := flapMode
+			if err == nil {
+				if strings.HasPrefix(ctlFlapMode, cap.MODE_FLAP) {
+					ctl := strings.Split(ctlFlapMode, "_")
+					fmt.Print(ctl)
+					callFlap = cap.MODE_GLIDE
+				} else {
+					callFlap = cap.MODE_GAZE
+				}
+				time.Sleep(200 * time.Millisecond)
+			} else {
+				if err.Error() != "init" {
+					fmt.Println("Waiting...")
+					time.Sleep(1 * time.Second)
+					callFlap = cap.MODE_GAZE
+				}
+			}
+			ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld")
+		}
 	}
 }
 
