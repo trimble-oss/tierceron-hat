@@ -34,8 +34,10 @@ const (
 )
 
 const (
-	MODE_FEATHER = "f"
-	MODE_GLIDE   = "g"
+	MODE_PERCH = "c"
+	MODE_FLAP  = "p"
+	MODE_GLIDE = "g"
+	MODE_GAZE  = "z"
 )
 
 var penseCodeMap map[string]string = map[string]string{}
@@ -92,7 +94,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 						message := string(messageBytes)
 						messageParts := strings.Split(message, ":")
 						if messageParts[0] == handshakeCode {
-							// handshake:featherctl:
+							// handshake:featherctl:f|p|g:activity
 							if messageParts[1] == "featherctl" && len(messageParts) == 4 {
 								var msg string = ""
 								var ok bool
@@ -100,11 +102,15 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 									// Default is Glide
 									msg = MODE_GLIDE
 								}
-								switch messageParts[2] {
-								case MODE_FEATHER: // Feather
-									penseFeatherCtlCodeMap.Set(messageParts[3], MODE_FEATHER)
-								case MODE_GLIDE: // Glide
-									penseFeatherCtlCodeMap.Set(messageParts[3], MODE_GLIDE)
+								if len(messageParts[3]) < 20 && len(messageParts[2]) < 100 {
+									switch {
+									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
+										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+									case strings.HasPrefix(messageParts[2], MODE_FLAP): // Flap
+										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+									case strings.HasPrefix(messageParts[2], MODE_GLIDE): // Glide
+										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+									}
 								}
 								conn.Write([]byte(msg))
 								defer conn.Close()
@@ -134,10 +140,10 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 	}
 }
 
-func Feather(encryptPass string, encryptSalt string, port string, handshakeCode string, acceptRemote func(int, string) bool) {
+func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, acceptRemote func(int, string) bool) {
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
-	if listener, err := kcp.ListenWithOptions("127.0.0.1:"+port, block, 10, 3); err == nil {
+	if listener, err := kcp.ListenWithOptions(hostAddr, block, 10, 3); err == nil {
 		for {
 			s, err := listener.AcceptKCP()
 			if err != nil {
@@ -285,7 +291,7 @@ func TapWriter(pense string) error {
 	return penseResponseErr
 }
 
-func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, mode string, pense string) (string, error) {
+func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string) (string, error) {
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 
@@ -294,7 +300,7 @@ func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, han
 		return "", penseErr
 	}
 	defer penseConn.Close()
-	_, penseWriteErr := penseConn.Write([]byte(handshakeCode + ":featherctl:" + mode + ":" + pense))
+	_, penseWriteErr := penseConn.Write([]byte(handshakeCode + ":featherctl:" + modeCtlPack + ":" + pense))
 	if penseWriteErr != nil {
 		return "", penseWriteErr
 	}

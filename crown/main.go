@@ -7,6 +7,7 @@ import (
 	"github.com/trimble-oss/tierceron-hat/cap"
 )
 
+// The original crown
 func main() {
 	exePath, exePathErr := os.Readlink("/proc/self/exe")
 	if exePathErr != nil {

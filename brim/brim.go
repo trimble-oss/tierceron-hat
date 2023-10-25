@@ -53,6 +53,7 @@ func penseQuery(pense string) {
 	log.Println(pense, r.GetPense())
 }
 
+// The original hat brim...
 func main() {
 	penseQuery("I think")
 	penseQuery("It is not enough to have a good mind.")
