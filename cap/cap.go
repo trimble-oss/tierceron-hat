@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -36,6 +37,8 @@ const (
 	MODE_GLIDE = "g"
 	MODE_GAZE  = "z"
 )
+
+var penseEyeMap map[string]string = map[string]string{}
 
 var penseCodeMap map[string]string = map[string]string{}
 var penseMemoryMap map[string]string = map[string]string{}
@@ -225,11 +228,7 @@ func Tap(target string, expectedSha256 string) error {
 
 				if expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
 					messageBytes := make([]byte, 64)
-
-					err := sysConn.Read(func(s uintptr) bool {
-						_, operr := syscall.Read(int(s), messageBytes)
-						return operr != syscall.EAGAIN
-					})
+					_, err := conn.Read(messageBytes)
 					if err != nil {
 						conn.Close()
 						continue
@@ -238,30 +237,38 @@ func Tap(target string, expectedSha256 string) error {
 
 					if len(message) == 64 {
 						penseCodeMap[message] = ""
+						eyes, err := json.Marshal(penseEyeMap)
+						if err != nil {
+							conn.Write([]byte("mad eye"))
+						}
+						conn.Write([]byte(eyes))
 					}
 				}
-
 			}
-
 		}
 		conn.Close()
 	}
 }
 
-func TapWriter(pense string) error {
+func TapWriter(pense string) (map[string]string, error) {
 	penseConn, penseErr := net.Dial("unix", penseSocket)
 	if penseErr != nil {
-		return penseErr
+		return nil, penseErr
 	}
 	_, penseWriteErr := penseConn.Write([]byte(pense))
 	defer penseConn.Close()
 	if penseWriteErr != nil {
-		return penseWriteErr
+		return nil, penseWriteErr
+	}
+	eyeMapRaw, penseResponseErr := io.ReadAll(penseConn)
+
+	if penseResponseErr == nil {
+		eyeMap := map[string]string{}
+		penseResponseDeserializeErr := json.Unmarshal(eyeMapRaw, &eyeMap)
+		return eyeMap, penseResponseDeserializeErr
 	}
 
-	_, penseResponseErr := io.ReadAll(penseConn)
-
-	return penseResponseErr
+	return nil, penseResponseErr
 }
 
 func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string) (string, error) {
@@ -313,6 +320,10 @@ func FeatherWriter(encryptPass string, encryptSalt string, hostAddr string, hand
 func TapFeather(penseIndex, memory string) {
 	penseMemoryMap[penseIndex] = memory
 	penseFeatherMemoryMap[penseIndex] = memory
+}
+
+func TapEyeRemember(penseIndex, memory string) {
+	penseEyeMap[penseIndex] = memory
 }
 
 func TapMemorize(penseIndex, memory string) {

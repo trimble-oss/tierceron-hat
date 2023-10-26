@@ -32,7 +32,11 @@ func penseQuery(pense string) {
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
 
-	cap.TapWriter(penseSum)
+	eyeMap, err := cap.TapWriter(penseSum)
+	if err != nil {
+		log.Fatalf("Failure to communicate: %v", err)
+	}
+	log.Printf("%v", eyeMap)
 
 	conn, err := grpc.Dial("127.0.0.1:1534", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
