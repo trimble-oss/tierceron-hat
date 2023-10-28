@@ -132,13 +132,3 @@ func TapWriter(pense string) (map[string]string, error) {
 
 	return nil, penseResponseErr
 }
-
-func PenseCode(penseCode string) (string, bool) {
-	if _, penseCodeOk := penseCodeMap[penseCode]; penseCodeOk {
-		delete(penseCodeMap, penseCode)
-		return penseCode, penseCodeOk
-	} else {
-		// Might be a feather
-		return "", false
-	}
-}
