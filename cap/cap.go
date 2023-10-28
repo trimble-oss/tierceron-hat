@@ -5,23 +5,20 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"log"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/mrjrieke/hat/cap/tap"
 
 	"github.com/lafriks/go-shamir"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/xtaci/kcp-go/v5"
 	"golang.org/x/crypto/pbkdf2"
-	"golang.org/x/sys/unix"
 	grpc "google.golang.org/grpc"
 )
 
@@ -38,17 +35,12 @@ const (
 	MODE_GAZE  = "z"
 )
 
-var penseEyeMap map[string]string = map[string]string{}
-
-var penseCodeMap map[string]string = map[string]string{}
 var penseMemoryMap map[string]string = map[string]string{}
 
 var penseFeatherCodeMap map[string]string = map[string]string{}
 var penseFeatherMemoryMap map[string]string = map[string]string{}
 
 var penseFeatherCtlCodeMap = cmap.New[string]()
-
-const penseSocket = "./snap.sock"
 
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
@@ -157,120 +149,6 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 	}
 }
 
-func Tap(target string, expectedSha256 string) error {
-	listener, err := net.Listen("unix", penseSocket)
-	if err != nil {
-		return err
-	}
-
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-	go func(c chan os.Signal) {
-		<-c
-		listener.Close()
-		os.Exit(0)
-	}(signalChan)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if conn != nil {
-				conn.Close()
-			}
-			return err
-		}
-
-		// 1st check.
-		if conn.RemoteAddr().Network() == conn.LocalAddr().Network() {
-
-			sysConn, sysConnErr := conn.(*net.UnixConn).SyscallConn()
-			if sysConnErr != nil {
-				conn.Close()
-				continue
-			}
-
-			var cred *unix.Ucred
-			var credErr error
-
-			sysConn.Control(func(fd uintptr) {
-				cred, credErr = unix.GetsockoptUcred(int(fd),
-					unix.SOL_SOCKET,
-					unix.SO_PEERCRED)
-			})
-			if credErr != nil {
-				conn.Close()
-				continue
-			}
-
-			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
-			if linkErr != nil {
-				conn.Close()
-				continue
-			}
-			defer conn.Close()
-
-			// 2nd check.
-			if path == target {
-				// 3rd check.
-				peerExe, err := os.Open(path)
-				if err != nil {
-					conn.Close()
-					continue
-				}
-				defer peerExe.Close()
-
-				h := sha256.New()
-				if _, err := io.Copy(h, peerExe); err != nil {
-					conn.Close()
-					continue
-				}
-
-				if expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
-					messageBytes := make([]byte, 64)
-					_, err := conn.Read(messageBytes)
-					if err != nil {
-						conn.Close()
-						continue
-					}
-					message := string(messageBytes)
-
-					if len(message) == 64 {
-						penseCodeMap[message] = ""
-						eyes, err := json.Marshal(penseEyeMap)
-						if err != nil {
-							conn.Write([]byte("mad eye"))
-						}
-						conn.Write([]byte(eyes))
-					}
-				}
-			}
-		}
-		conn.Close()
-	}
-}
-
-func TapWriter(pense string) (map[string]string, error) {
-	penseConn, penseErr := net.Dial("unix", penseSocket)
-	if penseErr != nil {
-		return nil, penseErr
-	}
-	_, penseWriteErr := penseConn.Write([]byte(pense))
-	defer penseConn.Close()
-	if penseWriteErr != nil {
-		return nil, penseWriteErr
-	}
-	eyeMapRaw, penseResponseErr := io.ReadAll(penseConn)
-
-	if penseResponseErr == nil {
-		eyeMap := map[string]string{}
-		penseResponseDeserializeErr := json.Unmarshal(eyeMapRaw, &eyeMap)
-		return eyeMap, penseResponseDeserializeErr
-	}
-
-	return nil, penseResponseErr
-}
-
 func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string) (string, error) {
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
@@ -323,7 +201,7 @@ func TapFeather(penseIndex, memory string) {
 }
 
 func TapEyeRemember(penseIndex, memory string) {
-	penseEyeMap[penseIndex] = memory
+	tap.PenseEyeMap[penseIndex] = memory
 }
 
 func TapMemorize(penseIndex, memory string) {
@@ -338,8 +216,8 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 
 	penseArray := sha256.Sum256([]byte(penseRequest.Pense))
 	penseCode := hex.EncodeToString(penseArray[:])
-	if _, penseCodeOk := penseCodeMap[penseCode]; penseCodeOk {
-		delete(penseCodeMap, penseCode)
+	if _, penseCodeOk := tap.PenseCodeMap[penseCode]; penseCodeOk {
+		delete(tap.PenseCodeMap, penseCode)
 
 		if pense, penseOk := penseMemoryMap[penseRequest.PenseIndex]; penseOk {
 			return &PenseReply{Pense: pense}, nil
@@ -367,7 +245,7 @@ func main() {
 	}
 	exePath := filepath.Dir(ex)
 	brimPath := strings.Replace(exePath, "/Cap", "/brim", 1)
-	go Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5")
+	go tap.Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5")
 	TapServer("127.0.0.1:1534")
 
 }
