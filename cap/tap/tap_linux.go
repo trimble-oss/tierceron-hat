@@ -19,13 +19,6 @@ import (
 
 const penseSocket = "./snap.sock"
 
-var penseEyeMap map[string]string = map[string]string{}
-var penseCodeMap map[string]string = map[string]string{}
-
-func TapEyeRemember(penseIndex, memory string) {
-	penseEyeMap[penseIndex] = memory
-}
-
 func Tap(target string, expectedSha256 string) error {
 	listener, err := net.Listen("unix", penseSocket)
 	if err != nil {

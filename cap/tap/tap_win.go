@@ -14,8 +14,3 @@ func TapWriter(pense string) (map[string]string, error) {
 	// Unsupported
 	return nil, errors.New("Unsupported")
 }
-
-func PenseCode(penseCode string) (string, bool) {
-	// Unsupported
-	return "", false
-}
