@@ -17,8 +17,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const penseSocket = "./snap.sock"
+
+var penseEyeMap map[string]string = map[string]string{}
+var penseCodeMap map[string]string = map[string]string{}
+
+func TapEyeRemember(penseIndex, memory string) {
+	penseEyeMap[penseIndex] = memory
+}
+
 func Tap(target string, expectedSha256 string) error {
-	listener, err := net.Listen("unix", PenseSocket)
+	listener, err := net.Listen("unix", penseSocket)
 	if err != nil {
 		return err
 	}
@@ -96,8 +105,8 @@ func Tap(target string, expectedSha256 string) error {
 					message := string(messageBytes)
 
 					if len(message) == 64 {
-						PenseCodeMap[message] = ""
-						eyes, err := json.Marshal(PenseEyeMap)
+						penseCodeMap[message] = ""
+						eyes, err := json.Marshal(penseEyeMap)
 						if err != nil {
 							conn.Write([]byte("mad eye"))
 						}
@@ -111,7 +120,7 @@ func Tap(target string, expectedSha256 string) error {
 }
 
 func TapWriter(pense string) (map[string]string, error) {
-	penseConn, penseErr := net.Dial("unix", PenseSocket)
+	penseConn, penseErr := net.Dial("unix", penseSocket)
 	if penseErr != nil {
 		return nil, penseErr
 	}
@@ -129,4 +138,14 @@ func TapWriter(pense string) (map[string]string, error) {
 	}
 
 	return nil, penseResponseErr
+}
+
+func PenseCode(penseCode string) (string, bool) {
+	if _, penseCodeOk := penseCodeMap[penseCode]; penseCodeOk {
+		delete(penseCodeMap, penseCode)
+		return penseCode, penseCodeOk
+	} else {
+		// Might be a feather
+		return "", false
+	}
 }

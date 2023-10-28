@@ -200,10 +200,6 @@ func TapFeather(penseIndex, memory string) {
 	penseFeatherMemoryMap[penseIndex] = memory
 }
 
-func TapEyeRemember(penseIndex, memory string) {
-	tap.PenseEyeMap[penseIndex] = memory
-}
-
 func TapMemorize(penseIndex, memory string) {
 	penseMemoryMap[penseIndex] = memory
 }
@@ -216,9 +212,8 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 
 	penseArray := sha256.Sum256([]byte(penseRequest.Pense))
 	penseCode := hex.EncodeToString(penseArray[:])
-	if _, penseCodeOk := tap.PenseCodeMap[penseCode]; penseCodeOk {
-		delete(tap.PenseCodeMap, penseCode)
 
+	if _, penseCodeOk := tap.PenseCode(penseCode); penseCodeOk {
 		if pense, penseOk := penseMemoryMap[penseRequest.PenseIndex]; penseOk {
 			return &PenseReply{Pense: pense}, nil
 		} else {
