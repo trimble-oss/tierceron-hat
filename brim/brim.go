@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/trimble-oss/tierceron-hat/cap"
+	"github.com/trimble-oss/tierceron-hat/cap/tap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -32,7 +33,7 @@ func penseQuery(pense string) {
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
 
-	eyeMap, err := cap.TapWriter(penseSum)
+	eyeMap, err := tap.TapWriter(penseSum)
 	if err != nil {
 		log.Fatalf("Failure to communicate: %v", err)
 	}
