@@ -10,7 +10,7 @@ import (
 )
 
 func featherCtl(pense string) {
-	flapMode := cap.MODE_FLAP
+	flapMode := cap.MODE_GAZE
 	ctlFlapMode := flapMode
 	var err error = errors.New("init")
 
@@ -22,8 +22,10 @@ func featherCtl(pense string) {
 			if err == nil {
 				if strings.HasPrefix(ctlFlapMode, cap.MODE_FLAP) {
 					ctl := strings.Split(ctlFlapMode, "_")
-					fmt.Print(ctl)
-					callFlap = cap.MODE_GLIDE
+					if len(ctl) > 1 {
+						fmt.Printf("%s.", ctl[1])
+					}
+					callFlap = cap.MODE_GAZE
 				} else {
 					callFlap = cap.MODE_GAZE
 				}

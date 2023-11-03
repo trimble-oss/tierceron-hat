@@ -51,12 +51,12 @@ func penseQuery(pense string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	r, err := c.Pense(ctx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
+	_, err = c.Pense(ctx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
 
-	log.Println(pense, r.GetPense())
+	// log.Println(pense, r.GetPense())
 }
 
 var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough", "the", "e", "lo", "o", "vly", "y", "wo", "ods", "I", "i", "wa", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "an", "der", "through", "the", "woods."}
@@ -65,12 +65,13 @@ var penses []string = []string{"I think", "It is not enough to have a good mind.
 
 func main() {
 	for {
-		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_FLAP) {
+		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
 			for i, modeCtl := range modeCtlTrail {
 				penseQuery(penses[i%3]) // Random activities...
 				flapMode := cap.MODE_FLAP + "_" + modeCtl
 				ctlFlapMode := flapMode
 				var err error = errors.New("init")
+				fmt.Printf("%s.", modeCtl)
 
 				for {
 					if err == nil && flapMode != ctlFlapMode {
@@ -79,13 +80,11 @@ func main() {
 					} else {
 						callFlap := flapMode
 						if err == nil {
-							callFlap = cap.MODE_GAZE
 							time.Sleep(200 * time.Millisecond)
 						} else {
 							if err.Error() != "init" {
 								fmt.Println("Waiting...")
 								time.Sleep(1 * time.Second)
-								callFlap = cap.MODE_GAZE
 							}
 						}
 						ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld")

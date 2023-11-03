@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -98,6 +97,10 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
 									case strings.HasPrefix(messageParts[2], MODE_FLAP): // Flap
+										if strings.HasPrefix(msg, MODE_GAZE) { // If had gaze, then flap...
+											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										}
+									case strings.HasPrefix(messageParts[2], MODE_GAZE): // Gaze
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
 									case strings.HasPrefix(messageParts[2], MODE_GLIDE): // Glide
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
@@ -163,10 +166,12 @@ func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, han
 		return "", penseWriteErr
 	}
 
-	responseBuf := []byte{1}
-	_, penseResponseErr := io.ReadFull(penseConn, responseBuf)
+	responseBuf := make([]byte, 100)
 
-	return string(responseBuf), penseResponseErr
+	penseConn.SetReadDeadline(time.Now().Add(5000 * time.Millisecond))
+	n, penseResponseErr := penseConn.Read(responseBuf)
+
+	return string(responseBuf[:n]), penseResponseErr
 }
 
 func FeatherWriter(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, pense string) ([]byte, error) {
@@ -189,10 +194,10 @@ func FeatherWriter(encryptPass string, encryptSalt string, hostAddr string, hand
 		}
 	}
 
-	responseBuf := []byte{1}
-	_, penseResponseErr := io.ReadFull(penseConn, responseBuf)
+	responseBuf := make([]byte, 100)
+	n, penseResponseErr := penseConn.Read(responseBuf)
 
-	return responseBuf, penseResponseErr
+	return responseBuf[:n], penseResponseErr
 }
 
 func TapFeather(penseIndex, memory string) {
