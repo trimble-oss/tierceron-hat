@@ -33,6 +33,19 @@ func randomString(n int) string {
 	return string(b)
 }
 
+var interruptChan chan os.Signal = make(chan os.Signal)
+var twoHundredMilliInterruptTicker *time.Ticker = time.NewTicker(200 * time.Millisecond)
+var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
+
+func interruptFun(tickerInterrupt *time.Ticker) {
+	select {
+	case <-interruptChan:
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		os.Exit(1)
+	case <-tickerInterrupt.C:
+	}
+}
+
 func penseQuery(pense string) {
 	penseCode := randomString(7 + rand.Intn(7))
 	penseArray := sha256.Sum256([]byte(penseCode))
@@ -67,13 +80,11 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
 func main() {
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	var ic chan os.Signal = make(chan os.Signal)
+	signal.Notify(ic, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-c
-		// TODO: Gaze after perch is still broken.
-		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
-		os.Exit(1)
+		x := <-ic
+		interruptChan <- x
 	}()
 
 	for {
@@ -98,15 +109,16 @@ func main() {
 
 					if err == nil && flapMode != ctlFlapMode {
 						// Flap, Gaze, etc...
+						interruptFun(twoHundredMilliInterruptTicker)
 						break
 					} else {
 						callFlap := flapMode
 						if err == nil {
-							time.Sleep(200 * time.Millisecond)
+							interruptFun(twoHundredMilliInterruptTicker)
 						} else {
 							if err.Error() != "init" {
 								fmt.Printf("\nWaiting...\n")
-								time.Sleep(1 * time.Second)
+								interruptFun(multiSecondInterruptTicker)
 							}
 						}
 						ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld")
