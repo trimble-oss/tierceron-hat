@@ -3,7 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mrjrieke/hat/cap"
@@ -13,6 +16,14 @@ func featherCtl(pense string) {
 	flapMode := cap.MODE_GAZE
 	ctlFlapMode := flapMode
 	var err error = errors.New("init")
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		// TODO: Gaze after perch is still broken.
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		os.Exit(1)
+	}()
 
 	for {
 		if err == nil && ctlFlapMode == cap.MODE_GLIDE {
