@@ -83,7 +83,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 							messageBytes = cremote[0]
 						} else {
 							// Race condition... Literally nothing can be done here other than
-							// give a response and exit.
+							// give an empty response and exit.
 							goto failover
 						}
 						cremote[0] = []byte{}
@@ -104,6 +104,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 									switch {
 									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										msg = MODE_PERCH
 									case strings.HasPrefix(messageParts[2], MODE_FLAP): // Flap
 										if strings.HasPrefix(msg, MODE_GAZE) { // If had gaze, then flap...
 											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])

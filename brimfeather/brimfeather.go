@@ -77,6 +77,7 @@ func main() {
 	}()
 
 	for {
+	perching:
 		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
 			fmt.Println("Fly away!")
 
@@ -88,6 +89,13 @@ func main() {
 				fmt.Printf("%s.", modeCtl)
 
 				for {
+					if err == nil && ctlFlapMode == cap.MODE_PERCH {
+						// Acknowledge perching...
+						cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+						ctlFlapMode = cap.MODE_PERCH
+						goto perching
+					}
+
 					if err == nil && flapMode != ctlFlapMode {
 						// Flap, Gaze, etc...
 						break
@@ -97,7 +105,7 @@ func main() {
 							time.Sleep(200 * time.Millisecond)
 						} else {
 							if err.Error() != "init" {
-								fmt.Println("Waiting...")
+								fmt.Printf("\nWaiting...\n")
 								time.Sleep(1 * time.Second)
 							}
 						}
@@ -108,7 +116,7 @@ func main() {
 			fmt.Printf("\nGliding....\n")
 			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_GLIDE, "HelloWorld")
 		} else {
-			fmt.Println("Perch and Gaze...")
+			fmt.Printf("\nPerch and Gaze...\n")
 			time.Sleep(1 * time.Second)
 		}
 	}

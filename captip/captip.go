@@ -12,18 +12,23 @@ import (
 	"github.com/mrjrieke/hat/cap"
 )
 
+var interruptChan chan os.Signal = make(chan os.Signal)
+var twoHundredMilliInterruptTicker *time.Ticker = time.NewTicker(200 * time.Millisecond)
+var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
+
+func interruptFun(tickerInterrupt *time.Ticker) {
+	select {
+	case <-interruptChan:
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		os.Exit(1)
+	case <-tickerInterrupt.C:
+	}
+}
+
 func featherCtl(pense string) {
 	flapMode := cap.MODE_GAZE
 	ctlFlapMode := flapMode
 	var err error = errors.New("init")
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		// TODO: Gaze after perch is still broken.
-		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
-		os.Exit(1)
-	}()
 
 	for {
 		if err == nil && ctlFlapMode == cap.MODE_GLIDE {
@@ -40,11 +45,11 @@ func featherCtl(pense string) {
 				} else {
 					callFlap = cap.MODE_GAZE
 				}
-				time.Sleep(200 * time.Millisecond)
+				interruptFun(twoHundredMilliInterruptTicker)
 			} else {
 				if err.Error() != "init" {
-					fmt.Println("Waiting...")
-					time.Sleep(1 * time.Second)
+					fmt.Printf("\nWaiting...\n")
+					interruptFun(multiSecondInterruptTicker)
 					callFlap = cap.MODE_GAZE
 				}
 			}
@@ -54,6 +59,13 @@ func featherCtl(pense string) {
 }
 
 func main() {
+	var ic chan os.Signal = make(chan os.Signal)
+	signal.Notify(ic, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		x := <-ic
+		interruptChan <- x
+	}()
+
 	fmt.Printf("\nFirst run\n")
 	featherCtl("HelloWorld")
 	fmt.Printf("\nResting....\n")
