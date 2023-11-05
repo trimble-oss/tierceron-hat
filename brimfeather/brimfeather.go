@@ -66,6 +66,8 @@ var penses []string = []string{"I think", "It is not enough to have a good mind.
 func main() {
 	for {
 		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
+			fmt.Println("Fly away!")
+
 			for i, modeCtl := range modeCtlTrail {
 				penseQuery(penses[i%3]) // Random activities...
 				flapMode := cap.MODE_FLAP + "_" + modeCtl
@@ -91,9 +93,10 @@ func main() {
 					}
 				}
 			}
-			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+			fmt.Printf("\nGliding....\n")
+			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_GLIDE, "HelloWorld")
 		} else {
-			fmt.Println("Waiting...")
+			fmt.Println("Perch and Gaze...")
 			time.Sleep(1 * time.Second)
 		}
 	}

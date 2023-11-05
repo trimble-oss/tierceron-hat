@@ -89,9 +89,10 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 								var msg string = ""
 								var ok bool
 								if msg, ok = penseFeatherCtlCodeMap.Get(messageParts[3]); !ok {
-									// Default is Glide
-									msg = MODE_GLIDE
+									// Default is Perch
+									msg = MODE_PERCH
 								}
+
 								if len(messageParts[3]) < 20 && len(messageParts[2]) < 100 {
 									switch {
 									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
@@ -101,7 +102,11 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
 										}
 									case strings.HasPrefix(messageParts[2], MODE_GAZE): // Gaze
-										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										if msg != MODE_GLIDE { // Gliding to perch...
+											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										} else {
+											penseFeatherCtlCodeMap.Set(messageParts[3], MODE_PERCH)
+										}
 									case strings.HasPrefix(messageParts[2], MODE_GLIDE): // Glide
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
 									}

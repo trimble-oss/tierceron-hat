@@ -15,7 +15,7 @@ func featherCtl(pense string) {
 	var err error = errors.New("init")
 
 	for {
-		if err == nil && ctlFlapMode == cap.MODE_PERCH {
+		if err == nil && ctlFlapMode == cap.MODE_GLIDE {
 			break
 		} else {
 			callFlap := flapMode
@@ -43,6 +43,11 @@ func featherCtl(pense string) {
 }
 
 func main() {
+	fmt.Printf("\nFirst run\n")
 	featherCtl("HelloWorld")
+	fmt.Printf("\nResting....\n")
+	time.Sleep(20 * time.Second)
+	fmt.Printf("\nTime for work....\n")
+	fmt.Printf("\n2nd run\n")
 	featherCtl("HelloWorld")
 }
