@@ -59,28 +59,28 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	}
 }
 
-var clientCodeMap map[string][][]byte = map[string][][]byte{}
+var clientCodeMap = cmap.New[[][]byte]()
 
 func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 	buf := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
-		if _, ok := clientCodeMap[conn.RemoteAddr().String()]; !ok {
-			clientCodeMap[conn.RemoteAddr().String()] = [][]byte{}
+		if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
+			clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
 		}
 
 		if n == 0 || err != nil {
 			// All done... hopefully.
-			if _, ok := clientCodeMap[conn.RemoteAddr().String()]; ok {
+			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
 				var messageBytes []byte
 				var err error = nil
-				if len(clientCodeMap[conn.RemoteAddr().String()]) > 1 {
-					messageBytes, err = shamir.Combine(clientCodeMap[conn.RemoteAddr().String()]...)
+				if cremote, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok && len(cremote) > 1 {
+					messageBytes, err = shamir.Combine(cremote...)
 				} else {
 					if acceptRemote(FEATHER_CTL, conn.RemoteAddr().String()) {
-						messageBytes = clientCodeMap[conn.RemoteAddr().String()][0]
-						clientCodeMap[conn.RemoteAddr().String()][0] = []byte{}
+						messageBytes = cremote[0]
+						cremote[0] = []byte{}
 						message := string(messageBytes)
 						messageParts := strings.Split(message, ":")
 						if messageParts[0] == handshakeCode {
@@ -134,7 +134,9 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 			defer conn.Close()
 			return
 		} else {
-			clientCodeMap[conn.RemoteAddr().String()] = append(clientCodeMap[conn.RemoteAddr().String()], append([]byte{}, buf[:n]...))
+			if ccmap, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
+				clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, append([]byte{}, buf[:n]...)))
+			}
 		}
 	}
 }
