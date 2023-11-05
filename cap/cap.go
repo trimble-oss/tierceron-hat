@@ -79,9 +79,16 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 					messageBytes, err = shamir.Combine(cremote...)
 				} else {
 					if acceptRemote(FEATHER_CTL, conn.RemoteAddr().String()) {
-						messageBytes = cremote[0]
+						if ok && len(cremote) > 0 {
+							messageBytes = cremote[0]
+						} else {
+							// Race condition... Literally nothing can be done here other than
+							// give a response and exit.
+							goto failover
+						}
 						cremote[0] = []byte{}
 						message := string(messageBytes)
+
 						messageParts := strings.Split(message, ":")
 						if messageParts[0] == handshakeCode {
 							// handshake:featherctl:f|p|g:activity
@@ -130,10 +137,15 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 					}
 				}
 			}
+		failover:
 			conn.Write([]byte(" "))
 			defer conn.Close()
 			return
 		} else {
+			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
+				clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
+			}
+
 			if ccmap, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
 				clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, append([]byte{}, buf[:n]...)))
 			}
