@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mrjrieke/hat/cap"
@@ -64,6 +67,15 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
 func main() {
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		// TODO: Gaze after perch is still broken.
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		os.Exit(1)
+	}()
+
 	for {
 		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
 			fmt.Println("Fly away!")
@@ -77,7 +89,7 @@ func main() {
 
 				for {
 					if err == nil && flapMode != ctlFlapMode {
-						// Glide, etc...
+						// Flap, Gaze, etc...
 						break
 					} else {
 						callFlap := flapMode
