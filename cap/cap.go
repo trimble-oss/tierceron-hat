@@ -36,7 +36,7 @@ const (
 
 var penseMemoryMap map[string]string = map[string]string{}
 
-var penseFeatherCodeMap map[string]string = map[string]string{}
+var penseFeatherCodeMap = cmap.New[string]()
 var penseFeatherMemoryMap map[string]string = map[string]string{}
 
 var penseFeatherCtlCodeMap = cmap.New[string]()
@@ -59,29 +59,36 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	}
 }
 
-var clientCodeMap map[string][][]byte = map[string][][]byte{}
+var clientCodeMap = cmap.New[[][]byte]()
 
 func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 	buf := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
-		if _, ok := clientCodeMap[conn.RemoteAddr().String()]; !ok {
-			clientCodeMap[conn.RemoteAddr().String()] = [][]byte{}
+		if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
+			clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
 		}
 
 		if n == 0 || err != nil {
 			// All done... hopefully.
-			if _, ok := clientCodeMap[conn.RemoteAddr().String()]; ok {
+			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
 				var messageBytes []byte
 				var err error = nil
-				if len(clientCodeMap[conn.RemoteAddr().String()]) > 1 {
-					messageBytes, err = shamir.Combine(clientCodeMap[conn.RemoteAddr().String()]...)
+				if cremote, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok && len(cremote) > 1 {
+					messageBytes, err = shamir.Combine(cremote...)
 				} else {
 					if acceptRemote(FEATHER_CTL, conn.RemoteAddr().String()) {
-						messageBytes = clientCodeMap[conn.RemoteAddr().String()][0]
-						clientCodeMap[conn.RemoteAddr().String()][0] = []byte{}
+						if ok && len(cremote) > 0 {
+							messageBytes = cremote[0]
+						} else {
+							// Race condition... Literally nothing can be done here other than
+							// give an empty response and exit.
+							goto failover
+						}
+						cremote[0] = []byte{}
 						message := string(messageBytes)
+
 						messageParts := strings.Split(message, ":")
 						if messageParts[0] == handshakeCode {
 							// handshake:featherctl:f|p|g:activity
@@ -89,19 +96,25 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 								var msg string = ""
 								var ok bool
 								if msg, ok = penseFeatherCtlCodeMap.Get(messageParts[3]); !ok {
-									// Default is Glide
-									msg = MODE_GLIDE
+									// Default is Perch
+									msg = MODE_PERCH
 								}
+
 								if len(messageParts[3]) < 20 && len(messageParts[2]) < 100 {
 									switch {
 									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										msg = MODE_PERCH
 									case strings.HasPrefix(messageParts[2], MODE_FLAP): // Flap
 										if strings.HasPrefix(msg, MODE_GAZE) { // If had gaze, then flap...
 											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
 										}
 									case strings.HasPrefix(messageParts[2], MODE_GAZE): // Gaze
-										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										if msg != MODE_GLIDE { // Gliding to perch...
+											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+										} else {
+											penseFeatherCtlCodeMap.Set(messageParts[3], MODE_PERCH)
+										}
 									case strings.HasPrefix(messageParts[2], MODE_GLIDE): // Glide
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
 									}
@@ -119,17 +132,24 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 						messageParts := strings.Split(message, ":")
 						if messageParts[0] == handshakeCode {
 							if len(messageParts[1]) == 64 {
-								penseFeatherCodeMap[messageParts[1]] = ""
+								penseFeatherCodeMap.Set(messageParts[1], "")
 							}
 						}
 					}
 				}
 			}
+		failover:
 			conn.Write([]byte(" "))
 			defer conn.Close()
 			return
 		} else {
-			clientCodeMap[conn.RemoteAddr().String()] = append(clientCodeMap[conn.RemoteAddr().String()], append([]byte{}, buf[:n]...))
+			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
+				clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
+			}
+
+			if ccmap, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
+				clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, append([]byte{}, buf[:n]...)))
+			}
 		}
 	}
 }
@@ -226,8 +246,8 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 		}
 	} else {
 		// Might be a feather
-		if _, penseCodeOk := penseFeatherCodeMap[penseCode]; penseCodeOk {
-			delete(penseFeatherCodeMap, penseCode)
+		if _, penseCodeOk := penseFeatherCodeMap.Get(penseCode); penseCodeOk {
+			penseFeatherCodeMap.Remove(penseCode)
 			if pense, penseOk := penseFeatherMemoryMap[penseRequest.PenseIndex]; penseOk {
 				return &PenseReply{Pense: pense}, nil
 			} else {

@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/trimble-oss/tierceron-hat/cap"
@@ -28,6 +31,19 @@ func randomString(n int) string {
 		b[i] = letterRunes[rand.Intn(len(letterRunes))]
 	}
 	return string(b)
+}
+
+var interruptChan chan os.Signal = make(chan os.Signal)
+var twoHundredMilliInterruptTicker *time.Ticker = time.NewTicker(200 * time.Millisecond)
+var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
+
+func interruptFun(tickerInterrupt *time.Ticker) {
+	select {
+	case <-interruptChan:
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		os.Exit(1)
+	case <-tickerInterrupt.C:
+	}
 }
 
 func penseQuery(pense string) {
@@ -64,8 +80,18 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
 func main() {
+	var ic chan os.Signal = make(chan os.Signal)
+	signal.Notify(ic, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		x := <-ic
+		interruptChan <- x
+	}()
+
 	for {
+	perching:
 		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
+			fmt.Println("Fly away!")
+
 			for i, modeCtl := range modeCtlTrail {
 				penseQuery(penses[i%3]) // Random activities...
 				flapMode := cap.MODE_FLAP + "_" + modeCtl
@@ -74,26 +100,35 @@ func main() {
 				fmt.Printf("%s.", modeCtl)
 
 				for {
+					if err == nil && ctlFlapMode == cap.MODE_PERCH {
+						// Acknowledge perching...
+						cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+						ctlFlapMode = cap.MODE_PERCH
+						goto perching
+					}
+
 					if err == nil && flapMode != ctlFlapMode {
-						// Glide, etc...
+						// Flap, Gaze, etc...
+						interruptFun(twoHundredMilliInterruptTicker)
 						break
 					} else {
 						callFlap := flapMode
 						if err == nil {
-							time.Sleep(200 * time.Millisecond)
+							interruptFun(twoHundredMilliInterruptTicker)
 						} else {
 							if err.Error() != "init" {
-								fmt.Println("Waiting...")
-								time.Sleep(1 * time.Second)
+								fmt.Printf("\nWaiting...\n")
+								interruptFun(multiSecondInterruptTicker)
 							}
 						}
 						ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld")
 					}
 				}
 			}
-			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+			fmt.Printf("\nGliding....\n")
+			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_GLIDE, "HelloWorld")
 		} else {
-			fmt.Println("Waiting...")
+			fmt.Printf("\nPerch and Gaze...\n")
 			time.Sleep(1 * time.Second)
 		}
 	}
