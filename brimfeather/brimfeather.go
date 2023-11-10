@@ -40,7 +40,7 @@ var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
 func interruptFun(tickerInterrupt *time.Ticker) {
 	select {
 	case <-interruptChan:
-		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld", true)
 		os.Exit(1)
 	case <-tickerInterrupt.C:
 	}
@@ -89,7 +89,7 @@ func main() {
 
 	for {
 	perching:
-		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld"); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
+		if featherMode, featherErr := cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_FLAP, "HelloWorld", false); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
 			fmt.Println("Fly away!")
 
 			for i, modeCtl := range modeCtlTrail {
@@ -102,7 +102,7 @@ func main() {
 				for {
 					if err == nil && ctlFlapMode == cap.MODE_PERCH {
 						// Acknowledge perching...
-						cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+						cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld", true)
 						ctlFlapMode = cap.MODE_PERCH
 						goto perching
 					}
@@ -121,15 +121,15 @@ func main() {
 								interruptFun(multiSecondInterruptTicker)
 							}
 						}
-						ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld")
+						ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld", true)
 					}
 				}
 			}
 			fmt.Printf("\nGliding....\n")
-			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_GLIDE, "HelloWorld")
+			cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_GLIDE, "HelloWorld", true)
 		} else {
 			fmt.Printf("\nPerch and Gaze...\n")
-			time.Sleep(1 * time.Second)
+			interruptFun(multiSecondInterruptTicker)
 		}
 	}
 }

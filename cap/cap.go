@@ -29,6 +29,8 @@ const (
 
 const (
 	MODE_PERCH = "c"
+	MOID_VOID  = "v"
+	MODE_PLUCK = "k"
 	MODE_FLAP  = "p"
 	MODE_GLIDE = "g"
 	MODE_GAZE  = "z"
@@ -39,6 +41,7 @@ var penseMemoryMap map[string]string = map[string]string{}
 var penseFeatherCodeMap = cmap.New[string]()
 var penseFeatherMemoryMap map[string]string = map[string]string{}
 
+var penseFeatherPluckMap = cmap.New[bool]()
 var penseFeatherCtlCodeMap = cmap.New[string]()
 
 func TapServer(address string, opt ...grpc.ServerOption) {
@@ -60,6 +63,35 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 }
 
 var clientCodeMap = cmap.New[[][]byte]()
+
+func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
+	buf := make([]byte, 15)
+	for {
+		conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+		message := string(buf[:n])
+		messageParts := strings.Split(message, ":")
+
+		if messageParts[0] == MODE_PLUCK {
+			if len(messageParts[1]) > 0 {
+				if _, ok := penseFeatherPluckMap.Pop(messageParts[1]); ok {
+					conn.Write([]byte(MODE_PLUCK))
+					defer conn.Close()
+					return
+				} else {
+					conn.Write([]byte(MOID_VOID))
+					defer conn.Close()
+					return
+				}
+			}
+		} else {
+			return
+		}
+	}
+}
 
 func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 	buf := make([]byte, 4096)
@@ -101,6 +133,10 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 								}
 
 								if len(messageParts[3]) < 20 && len(messageParts[2]) < 100 {
+
+									if messageParts[2] != MODE_PERCH && messageParts[2] != MODE_FLAP {
+										penseFeatherPluckMap.Set(messageParts[3], true)
+									}
 									switch {
 									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
 										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
@@ -155,13 +191,28 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 }
 
 func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, acceptRemote func(int, string) bool) {
+	go func() {
+		if pluckListener, err := kcp.ListenWithOptions(hostAddr+"1", nil, 0, 0); err == nil {
+			for {
+				pluckS, err := pluckListener.AcceptKCP()
+				if err != nil {
+					continue
+				}
+				if acceptRemote(FEATHER_COMMON, pluckS.RemoteAddr().String()) {
+					go handlePluck(pluckS, acceptRemote)
+				} else {
+					pluckS.Close()
+				}
+			}
+		}
+	}()
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 	if listener, err := kcp.ListenWithOptions(hostAddr, block, 10, 3); err == nil {
 		for {
 			s, err := listener.AcceptKCP()
 			if err != nil {
-				log.Fatal(err)
+				continue
 			}
 			if acceptRemote(FEATHER_COMMON, s.RemoteAddr().String()) {
 				go handleMessage(handshakeCode, s, acceptRemote)
@@ -172,7 +223,42 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 	}
 }
 
-func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string) (string, error) {
+// Pluck is a blocking call
+func PluckCtlEmit(hostAddr string, pense string) bool {
+
+	for {
+		penseConn, penseErr := kcp.Dial(hostAddr + "1")
+		if penseErr != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		defer penseConn.Close()
+		_, penseWriteErr := penseConn.Write([]byte(MODE_PLUCK + ":" + pense))
+		if penseWriteErr != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		responseBuf := make([]byte, 100)
+
+		penseConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		n, penseResponseErr := penseConn.Read(responseBuf)
+		if penseResponseErr != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		response := string(responseBuf[:n])
+		if response == MODE_PLUCK {
+			return true
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string, bypass bool) (string, error) {
+	if !bypass && modeCtlPack == MODE_FLAP {
+		PluckCtlEmit(hostAddr, pense)
+	}
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 

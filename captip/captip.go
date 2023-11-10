@@ -19,7 +19,7 @@ var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
 func interruptFun(tickerInterrupt *time.Ticker) {
 	select {
 	case <-interruptChan:
-		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld")
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld", true)
 		os.Exit(1)
 	case <-tickerInterrupt.C:
 	}
@@ -29,8 +29,10 @@ func featherCtl(pense string) {
 	flapMode := cap.MODE_GAZE
 	ctlFlapMode := flapMode
 	var err error = errors.New("init")
+	bypass := err == nil || err.Error() != "init"
 
 	for {
+		gazeCnt := 0
 		if err == nil && ctlFlapMode == cap.MODE_GLIDE {
 			break
 		} else {
@@ -42,7 +44,13 @@ func featherCtl(pense string) {
 						fmt.Printf("%s.", ctl[1])
 					}
 					callFlap = cap.MODE_GAZE
+					gazeCnt = 0
 				} else {
+					gazeCnt = gazeCnt + 1
+					if gazeCnt > 5 {
+						// Too much gazing
+						bypass = false
+					}
 					callFlap = cap.MODE_GAZE
 				}
 				interruptFun(twoHundredMilliInterruptTicker)
@@ -53,7 +61,7 @@ func featherCtl(pense string) {
 					callFlap = cap.MODE_GAZE
 				}
 			}
-			ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld")
+			ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld", bypass)
 		}
 	}
 }
