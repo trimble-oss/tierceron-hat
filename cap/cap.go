@@ -65,7 +65,7 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 var clientCodeMap = cmap.New[[][]byte]()
 
 func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
-	buf := make([]byte, 15)
+	buf := make([]byte, 50)
 	for {
 		conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
@@ -132,7 +132,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 									msg = MODE_PERCH
 								}
 
-								if len(messageParts[3]) < 20 && len(messageParts[2]) < 100 {
+								if len(messageParts[3]) < 50 && len(messageParts[2]) < 100 {
 
 									if messageParts[2] != MODE_PERCH && messageParts[2] != MODE_FLAP {
 										penseFeatherPluckMap.Set(messageParts[3], true)
