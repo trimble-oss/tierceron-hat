@@ -16,10 +16,15 @@ var interruptChan chan os.Signal = make(chan os.Signal)
 var twoHundredMilliInterruptTicker *time.Ticker = time.NewTicker(200 * time.Millisecond)
 var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
 
+func acceptRemote(int, string) bool {
+	interruptFun(multiSecondInterruptTicker)
+	return true
+}
+
 func interruptFun(tickerInterrupt *time.Ticker) {
 	select {
 	case <-interruptChan:
-		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld", true)
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld", true, nil)
 		os.Exit(1)
 	case <-tickerInterrupt.C:
 	}
@@ -61,7 +66,7 @@ func featherCtl(pense string) {
 					callFlap = cap.MODE_GAZE
 				}
 			}
-			ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld", bypass)
+			ctlFlapMode, err = cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", callFlap, "HelloWorld", bypass, acceptRemote)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log"
 	"net"
 	"os"
@@ -224,14 +225,16 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 }
 
 // Pluck is a blocking call
-func PluckCtlEmit(hostAddr string, pense string) bool {
+func PluckCtlEmit(hostAddr string, pense string, acceptRemote func(int, string) bool) bool {
 
 	for {
 		penseConn, penseErr := kcp.Dial(hostAddr + "1")
+
 		if penseErr != nil {
 			time.Sleep(time.Second)
 			continue
 		}
+
 		defer penseConn.Close()
 		_, penseWriteErr := penseConn.Write([]byte(MODE_PLUCK + ":" + pense))
 		if penseWriteErr != nil {
@@ -251,13 +254,22 @@ func PluckCtlEmit(hostAddr string, pense string) bool {
 		if response == MODE_PLUCK {
 			return true
 		}
-		time.Sleep(time.Second)
+
+		if acceptRemote == nil {
+			return false
+		} else {
+			if !acceptRemote(FEATHER_CTL, penseConn.RemoteAddr().String()) {
+				return false
+			}
+		}
 	}
 }
 
-func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string, bypass bool) (string, error) {
+func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string, bypass bool, acceptRemote func(int, string) bool) (string, error) {
 	if !bypass && modeCtlPack == MODE_FLAP {
-		PluckCtlEmit(hostAddr, pense)
+		if !PluckCtlEmit(hostAddr, pense, acceptRemote) {
+			return "", errors.New("interrupted")
+		}
 	}
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
