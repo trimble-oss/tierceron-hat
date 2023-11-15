@@ -5,7 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -225,9 +225,10 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 }
 
 // Pluck is a blocking call
-func PluckCtlEmit(hostAddr string, pense string, acceptRemote func(int, string) bool) bool {
+func PluckCtlEmit(hostAddr string, pense string, acceptRemote func(int, string) (bool, error)) (bool, error) {
 
 	for {
+		fmt.Println("Pluck")
 		penseConn, penseErr := kcp.Dial(hostAddr + "1")
 
 		if penseErr != nil {
@@ -252,23 +253,29 @@ func PluckCtlEmit(hostAddr string, pense string, acceptRemote func(int, string) 
 		}
 		response := string(responseBuf[:n])
 		if response == MODE_PLUCK {
-			return true
+			return true, nil
 		}
 
 		if acceptRemote == nil {
-			return false
+			return false, nil
 		} else {
-			if !acceptRemote(FEATHER_CTL, penseConn.RemoteAddr().String()) {
-				return false
+			if breakImmediate, accErr := acceptRemote(FEATHER_CTL, penseConn.RemoteAddr().String()); breakImmediate {
+				// Break, but don't exit encapsulating calling function.
+				return false, accErr
+			} else {
+				// No break immediate, however only return if error is returned...
+				if accErr != nil {
+					return true, accErr
+				}
 			}
 		}
 	}
 }
 
-func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string, bypass bool, acceptRemote func(int, string) bool) (string, error) {
+func FeatherCtlEmit(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, modeCtlPack string, pense string, bypass bool, acceptRemote func(int, string) (bool, error)) (string, error) {
 	if !bypass && modeCtlPack == MODE_FLAP {
-		if !PluckCtlEmit(hostAddr, pense, acceptRemote) {
-			return "", errors.New("interrupted")
+		if breakImmediate, accErr := PluckCtlEmit(hostAddr, pense, acceptRemote); breakImmediate && accErr != nil {
+			return "", accErr
 		}
 	}
 	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
