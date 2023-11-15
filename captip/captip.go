@@ -15,10 +15,29 @@ import (
 var interruptChan chan os.Signal = make(chan os.Signal)
 var twoHundredMilliInterruptTicker *time.Ticker = time.NewTicker(200 * time.Millisecond)
 var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
+var fifteenSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second * 15)
+var thirtySecondInterruptTicker *time.Ticker = time.NewTicker(time.Second * 30)
 
-func acceptRemote(int, string) bool {
-	interruptFun(multiSecondInterruptTicker)
-	return true
+func acceptInterruptFun(tickerContinue *time.Ticker, tickerBreak *time.Ticker, tickerInterrupt *time.Ticker) (bool, error) {
+	select {
+	case <-interruptChan:
+		cap.FeatherCtlEmit("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", cap.MODE_PERCH, "HelloWorld", true, nil)
+		os.Exit(1)
+	case <-tickerContinue.C:
+		// don't break... continue...
+		return false, nil
+	case <-tickerBreak.C:
+		// break and continue
+		return true, nil
+	case <-tickerInterrupt.C:
+		// full stop
+		return true, errors.New("you shall not pass")
+	}
+	return true, errors.New("not possible")
+}
+
+func acceptRemote(int, string) (bool, error) {
+	return acceptInterruptFun(multiSecondInterruptTicker, fifteenSecondInterruptTicker, thirtySecondInterruptTicker)
 }
 
 func interruptFun(tickerInterrupt *time.Ticker) {
