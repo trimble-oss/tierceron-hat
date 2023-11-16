@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -228,7 +227,6 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 func PluckCtlEmit(hostAddr string, pense string, acceptRemote func(int, string) (bool, error)) (bool, error) {
 
 	for {
-		fmt.Println("Pluck")
 		penseConn, penseErr := kcp.Dial(hostAddr + "1")
 
 		if penseErr != nil {
