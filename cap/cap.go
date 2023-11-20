@@ -70,6 +70,7 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 		conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
 		if err != nil {
+			conn.Close()
 			return
 		}
 		message := string(buf[:n])
@@ -79,15 +80,16 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 			if len(messageParts[1]) > 0 {
 				if _, ok := penseFeatherPluckMap.Pop(messageParts[1]); ok {
 					conn.Write([]byte(MODE_PLUCK))
-					defer conn.Close()
+					conn.Close()
 					return
 				} else {
 					conn.Write([]byte(MOID_VOID))
-					defer conn.Close()
+					conn.Close()
 					return
 				}
 			}
 		} else {
+			conn.Close()
 			return
 		}
 	}
