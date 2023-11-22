@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/mrjrieke/hat/cap"
 	captiplib "github.com/mrjrieke/hat/captip/captiplib"
 )
 
@@ -17,21 +18,28 @@ func emote(msg string) {
 	fmt.Print(msg)
 }
 
-func interupted() {
+func interrupted(featherCtx *cap.FeatherContext) error {
 	os.Exit(-1)
+	return nil
 }
 
 func main() {
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
 
-	captiplib.FeatherCtlInit(interruptChan, "127.0.0.1:1534", "Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", "HelloWorld", captiplib.AcceptRemote, interupted)
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, "127.0.0.1:1534", "Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", "HelloWorld", captiplib.AcceptRemote, interrupted)
 
-	var modeCtlTrailChan chan string = make(chan string, 5)
+	var modeCtlTrailChan chan string = make(chan string)
 
-	go captiplib.FeatherCtlEmitter(modeCtlTrailChan, emote, captiplib.FeatherQueryCache)
+	go captiplib.FeatherCtlEmitter(featherCtx, modeCtlTrailChan, emote, captiplib.FeatherQueryCache)
 
+rerun:
+	featherCtx.RunState = cap.RUN_STARTED
 	for _, modeCtl := range modeCtlTrail {
+		featherCtx.RunState = cap.RUNNING
 		modeCtlTrailChan <- modeCtl
+		if featherCtx.RunState == cap.RESETTING {
+			goto rerun
+		}
 	}
 }
