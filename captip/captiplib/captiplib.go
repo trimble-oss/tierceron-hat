@@ -16,40 +16,31 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-var interruptChan chan os.Signal
-var twoHundredMilliInterruptTicker *time.Ticker = time.NewTicker(200 * time.Millisecond)
-var multiSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second)
-var fifteenSecondInterruptTicker *time.Ticker = time.NewTicker(time.Second * 15)
-var thirtySecondInterruptTicker *time.Ticker = time.NewTicker(time.Second * 30)
-
-var gEncryptPass string
-var gEncryptSalt string
-var gLocalHostAddr string
-var gHostAddr string
-var gHandshakeCode string
-var gSessionIdentifier string
-var gAcceptRemoteFunc func(int, string) (bool, error)
-var gInterruptFunc func()
-
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
-func FeatherCtlInit(icIn chan os.Signal, localHostAddr string, encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, sessionIdentifier string, acceptRemoteFunc func(int, string) (bool, error), interruptFunc func()) {
-	gLocalHostAddr = localHostAddr
-	gEncryptPass = encryptPass
-	gEncryptSalt = encryptSalt
-	gHostAddr = hostAddr
-	gHandshakeCode = handshakeCode
-	gSessionIdentifier = sessionIdentifier
-	gAcceptRemoteFunc = acceptRemoteFunc
-	gInterruptFunc = interruptFunc
-	interruptChan = icIn
+func FeatherCtlInit(icIn chan os.Signal, localHostAddr string, encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, sessionIdentifier string, acceptRemoteFunc func(*cap.FeatherContext, int, string) (bool, error), interruptedFunc func(*cap.FeatherContext) error) *cap.FeatherContext {
+	return &cap.FeatherContext{
+		LocalHostAddr:                  localHostAddr,
+		EncryptPass:                    encryptPass,
+		EncryptSalt:                    encryptSalt,
+		HostAddr:                       hostAddr,
+		HandshakeCode:                  handshakeCode,
+		SessionIdentifier:              sessionIdentifier,
+		AcceptRemoteFunc:               acceptRemoteFunc,
+		InterruptHandlerFunc:           interruptedFunc,
+		InterruptChan:                  icIn,
+		TwoHundredMilliInterruptTicker: time.NewTicker(200 * time.Millisecond),
+		MultiSecondInterruptTicker:     time.NewTicker(time.Second),
+		FifteenSecondInterruptTicker:   time.NewTicker(time.Second * 15),
+		ThirtySecondInterruptTicker:    time.NewTicker(time.Second * 30),
+	}
 }
 
-func acceptInterruptFun(tickerContinue *time.Ticker, tickerBreak *time.Ticker, tickerInterrupt *time.Ticker) (bool, error) {
+func acceptInterruptFun(featherCtx *cap.FeatherContext, tickerContinue *time.Ticker, tickerBreak *time.Ticker, tickerInterrupt *time.Ticker) (bool, error) {
 	select {
-	case <-interruptChan:
-		cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, cap.MODE_PERCH, gSessionIdentifier, true, nil)
+	case <-featherCtx.InterruptChan:
+		cap.FeatherCtlEmit(featherCtx, cap.MODE_PERCH, featherCtx.SessionIdentifier, true)
 		return true, errors.New("you shall not pass")
 	case <-tickerContinue.C:
 		// don't break... continue...
@@ -64,21 +55,21 @@ func acceptInterruptFun(tickerContinue *time.Ticker, tickerBreak *time.Ticker, t
 	return true, errors.New("not possible")
 }
 
-func AcceptRemote(int, string) (bool, error) {
-	return acceptInterruptFun(multiSecondInterruptTicker, fifteenSecondInterruptTicker, thirtySecondInterruptTicker)
+func AcceptRemote(featherCtx *cap.FeatherContext, x int, y string) (bool, error) {
+	return acceptInterruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker, featherCtx.FifteenSecondInterruptTicker, featherCtx.ThirtySecondInterruptTicker)
 }
 
-func interruptFun(tickerInterrupt *time.Ticker) error {
+func interruptFun(featherCtx *cap.FeatherContext, tickerInterrupt *time.Ticker) error {
 	select {
-	case <-interruptChan:
-		cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, cap.MODE_PERCH, gSessionIdentifier, true, nil)
+	case <-featherCtx.InterruptChan:
+		cap.FeatherCtlEmit(featherCtx, cap.MODE_PERCH, featherCtx.SessionIdentifier, true)
 		return errors.New("interrupted")
 	case <-tickerInterrupt.C:
 	}
 	return nil
 }
 
-func FeatherCtl(pense string) {
+func FeatherCtl(featherCtx *cap.FeatherContext, pense string) {
 	flapMode := cap.MODE_GAZE
 	ctlFlapMode := flapMode
 	var err error = errors.New("init")
@@ -106,10 +97,10 @@ func FeatherCtl(pense string) {
 					}
 					callFlap = cap.MODE_GAZE
 				}
-				err := interruptFun(twoHundredMilliInterruptTicker)
+				err := interruptFun(featherCtx, featherCtx.TwoHundredMilliInterruptTicker)
 				if err != nil {
-					if gInterruptFunc != nil {
-						gInterruptFunc()
+					if featherCtx.InterruptHandlerFunc != nil {
+						featherCtx.InterruptHandlerFunc(featherCtx)
 					} else {
 						os.Exit(-1)
 					}
@@ -117,17 +108,17 @@ func FeatherCtl(pense string) {
 			} else {
 				if err.Error() != "init" {
 					if err.Error() == "you shall not pass" {
-						if gInterruptFunc != nil {
-							gInterruptFunc()
+						if featherCtx.InterruptHandlerFunc != nil {
+							featherCtx.InterruptHandlerFunc(featherCtx)
 						} else {
 							os.Exit(-1)
 						}
 					}
 					fmt.Printf("\nWaiting...\n")
-					err := interruptFun(multiSecondInterruptTicker)
+					err := interruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
 					if err != nil {
-						if gInterruptFunc != nil {
-							gInterruptFunc()
+						if featherCtx.InterruptHandlerFunc != nil {
+							featherCtx.InterruptHandlerFunc(featherCtx)
 						} else {
 							os.Exit(-1)
 						}
@@ -135,7 +126,7 @@ func FeatherCtl(pense string) {
 					callFlap = cap.MODE_GAZE
 				}
 			}
-			ctlFlapMode, err = cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, callFlap, gSessionIdentifier, bypass, gAcceptRemoteFunc)
+			ctlFlapMode, err = cap.FeatherCtlEmit(featherCtx, callFlap, featherCtx.SessionIdentifier, bypass)
 		}
 	}
 }
@@ -150,17 +141,17 @@ func randomString(n int) string {
 	return string(b)
 }
 
-func FeatherQueryCache(pense string) (string, error) {
+func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, error) {
 	penseCode := randomString(7 + rand.Intn(7))
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
 
-	_, featherErr := cap.FeatherWriter(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, penseSum)
+	_, featherErr := cap.FeatherWriter(featherCtx, penseSum)
 	if featherErr != nil {
 		return "", featherErr
 	}
 
-	conn, err := grpc.Dial(gLocalHostAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(featherCtx.LocalHostAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return "", err
 	}
@@ -179,21 +170,21 @@ func FeatherQueryCache(pense string) (string, error) {
 	return r.GetPense(), nil
 }
 
-func FeatherCtlEmitter(modeCtlTrailChan chan string,
+func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan string,
 	emote func(string),
-	queryAction func(string) (string, error)) (string, error) {
+	queryAction func(*cap.FeatherContext, string) (string, error)) (string, error) {
 	if emote == nil {
-		emote = func(msg string) { fmt.Printf(msg) }
+		emote = func(msg string) { fmt.Print(msg) }
 	}
 
 	for {
 	perching:
-		if featherMode, featherErr := cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, cap.MODE_FLAP, gSessionIdentifier, false, gAcceptRemoteFunc); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
+		if featherMode, featherErr := cap.FeatherCtlEmit(featherCtx, cap.MODE_FLAP, featherCtx.SessionIdentifier, false); featherErr == nil && strings.HasPrefix(featherMode, cap.MODE_GAZE) {
 			emote("Fly away!\n")
 
 			for modeCtl := range modeCtlTrailChan {
 				if queryAction != nil {
-					queryAction(modeCtl)
+					queryAction(featherCtx, modeCtl)
 				}
 				flapMode := cap.MODE_FLAP + "_" + modeCtl
 				ctlFlapMode := flapMode
@@ -203,17 +194,17 @@ func FeatherCtlEmitter(modeCtlTrailChan chan string,
 				for {
 					if err == nil && ctlFlapMode == cap.MODE_PERCH {
 						// Acknowledge perching...
-						cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, cap.MODE_PERCH, gSessionIdentifier, true, gAcceptRemoteFunc)
+						cap.FeatherCtlEmit(featherCtx, cap.MODE_PERCH, featherCtx.SessionIdentifier, true)
 						ctlFlapMode = cap.MODE_PERCH
 						goto perching
 					}
 
 					if err == nil && flapMode != ctlFlapMode {
 						// Flap, Gaze, etc...
-						err := interruptFun(twoHundredMilliInterruptTicker)
+						err := interruptFun(featherCtx, featherCtx.TwoHundredMilliInterruptTicker)
 						if err != nil {
-							if gInterruptFunc != nil {
-								gInterruptFunc()
+							if featherCtx.InterruptHandlerFunc != nil {
+								featherCtx.InterruptHandlerFunc(featherCtx)
 							} else {
 								os.Exit(-1)
 							}
@@ -223,10 +214,10 @@ func FeatherCtlEmitter(modeCtlTrailChan chan string,
 					} else {
 						callFlap := flapMode
 						if err == nil {
-							err := interruptFun(twoHundredMilliInterruptTicker)
+							err := interruptFun(featherCtx, featherCtx.TwoHundredMilliInterruptTicker)
 							if err != nil {
-								if gInterruptFunc != nil {
-									gInterruptFunc()
+								if featherCtx.InterruptHandlerFunc != nil {
+									featherCtx.InterruptHandlerFunc(featherCtx)
 								} else {
 									os.Exit(-1)
 								}
@@ -235,35 +226,47 @@ func FeatherCtlEmitter(modeCtlTrailChan chan string,
 						} else {
 							if err.Error() != "init" {
 								if err.Error() == "you shall not pass" {
-									if gInterruptFunc != nil {
-										gInterruptFunc()
+									if featherCtx.InterruptHandlerFunc != nil {
+										featherCtx.InterruptHandlerFunc(featherCtx)
 									} else {
 										os.Exit(-1)
 									}
 								}
 								emote("\nWaiting...\n")
-								err := interruptFun(multiSecondInterruptTicker)
+								err := interruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
 								if err != nil {
-									if gInterruptFunc != nil {
-										gInterruptFunc()
+									if featherCtx.InterruptHandlerFunc != nil {
+										featherCtx.InterruptHandlerFunc(featherCtx)
 									} else {
 										os.Exit(-1)
 									}
 								}
 							}
 						}
-						ctlFlapMode, err = cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, callFlap, gSessionIdentifier, true, gAcceptRemoteFunc)
+						ctlFlapMode, err = cap.FeatherCtlEmit(featherCtx, callFlap, featherCtx.SessionIdentifier, true)
 					}
 				}
 			}
 			emote("\nGliding....\n")
-			cap.FeatherCtlEmit(gEncryptPass, gEncryptSalt, gHostAddr, gHandshakeCode, cap.MODE_GLIDE, gSessionIdentifier, true, gAcceptRemoteFunc)
+			cap.FeatherCtlEmit(featherCtx, cap.MODE_GLIDE, featherCtx.SessionIdentifier, true)
 		} else {
 			emote("\nPerch and Gaze...\n")
-			err := interruptFun(multiSecondInterruptTicker)
+			if featherCtx.RunState == cap.RUNNING {
+				for {
+					// drain before reset.
+					select {
+					case <-modeCtlTrailChan:
+					default:
+						featherCtx.RunState = cap.RESETTING
+						goto cleancomplete
+					}
+				}
+			cleancomplete:
+			}
+			err := interruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
 			if err != nil {
-				if gInterruptFunc != nil {
-					gInterruptFunc()
+				if featherCtx.InterruptHandlerFunc != nil {
+					featherCtx.InterruptHandlerFunc(featherCtx)
 				} else {
 					os.Exit(-1)
 				}
