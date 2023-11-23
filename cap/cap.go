@@ -42,20 +42,21 @@ const (
 )
 
 type FeatherContext struct {
-	EncryptPass                    string
-	EncryptSalt                    string
-	LocalHostAddr                  string
-	HostAddr                       string
-	HandshakeCode                  string
-	SessionIdentifier              string
+	EncryptPass                    *string
+	EncryptSalt                    *string
+	LocalHostAddr                  *string
+	HostAddr                       *string
+	HandshakeCode                  *string
+	SessionIdentifier              *string
 	AcceptRemoteFunc               func(*FeatherContext, int, string) (bool, error)
 	InterruptHandlerFunc           func(*FeatherContext) error
 	InterruptChan                  chan os.Signal
-	RunState                       int // whether to restart a run
+	RunState                       int64 // whether to restart a run
 	TwoHundredMilliInterruptTicker *time.Ticker
 	MultiSecondInterruptTicker     *time.Ticker
 	FifteenSecondInterruptTicker   *time.Ticker
 	ThirtySecondInterruptTicker    *time.Ticker
+	Log                            log.Logger
 }
 
 var penseMemoryMap map[string]string = map[string]string{}
@@ -251,7 +252,7 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 func PluckCtlEmit(featherCtx *FeatherContext, pense string) (bool, error) {
 
 	for {
-		penseConn, penseErr := kcp.Dial(featherCtx.HostAddr + "1")
+		penseConn, penseErr := kcp.Dial(*featherCtx.HostAddr + "1")
 
 		if penseErr != nil {
 			time.Sleep(time.Second)
@@ -300,15 +301,15 @@ func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string
 			return "", accErr
 		}
 	}
-	key := pbkdf2.Key([]byte(featherCtx.EncryptPass), []byte(featherCtx.EncryptSalt), 1024, 32, sha1.New)
+	key := pbkdf2.Key([]byte(*featherCtx.EncryptPass), []byte(*featherCtx.EncryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 
-	penseConn, penseErr := kcp.DialWithOptions(featherCtx.HostAddr, block, 10, 3)
+	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
 	if penseErr != nil {
 		return "", penseErr
 	}
 	defer penseConn.Close()
-	_, penseWriteErr := penseConn.Write([]byte(featherCtx.HandshakeCode + ":featherctl:" + modeCtlPack + ":" + pense))
+	_, penseWriteErr := penseConn.Write([]byte(*featherCtx.HandshakeCode + ":featherctl:" + modeCtlPack + ":" + pense))
 	if penseWriteErr != nil {
 		return "", penseWriteErr
 	}
@@ -322,14 +323,14 @@ func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string
 }
 
 func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
-	penseSplits, err := shamir.Split([]byte(featherCtx.HandshakeCode+":"+pense), 12, 7)
+	penseSplits, err := shamir.Split([]byte(*featherCtx.HandshakeCode+":"+pense), 12, 7)
 	if err != nil {
 		return nil, err
 	}
-	key := pbkdf2.Key([]byte(featherCtx.EncryptPass), []byte(featherCtx.EncryptSalt), 1024, 32, sha1.New)
+	key := pbkdf2.Key([]byte(*featherCtx.EncryptPass), []byte(*featherCtx.EncryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 
-	penseConn, penseErr := kcp.DialWithOptions(featherCtx.HostAddr, block, 10, 3)
+	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
 	if penseErr != nil {
 		return nil, penseErr
 	}

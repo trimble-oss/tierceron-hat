@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/mrjrieke/hat/cap"
@@ -14,7 +15,7 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
-func emote(msg string) {
+func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
 	fmt.Print(msg)
 }
 
@@ -27,18 +28,25 @@ func main() {
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
 
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, "127.0.0.1:1534", "Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", "HelloWorld", captiplib.AcceptRemote, interrupted)
+	localHostAddr := ""
+	encryptPass := "Som18vhjqa72935h"
+	encryptSalt := "1cx7v89as7df89"
+	hostAddr := "127.0.0.1:1832"
+	handshakeCode := "ThisIsACode"
+	sessionIdentifier := "HelloWorld"
+
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
 
 	var modeCtlTrailChan chan string = make(chan string)
 
 	go captiplib.FeatherCtlEmitter(featherCtx, modeCtlTrailChan, emote, captiplib.FeatherQueryCache)
 
 rerun:
-	featherCtx.RunState = cap.RUN_STARTED
+	atomic.StoreInt64(&featherCtx.RunState, cap.RUN_STARTED)
 	for _, modeCtl := range modeCtlTrail {
-		featherCtx.RunState = cap.RUNNING
+		atomic.StoreInt64(&featherCtx.RunState, cap.RUNNING)
 		modeCtlTrailChan <- modeCtl
-		if featherCtx.RunState == cap.RESETTING {
+		if atomic.LoadInt64(&featherCtx.RunState) == cap.RESETTING {
 			goto rerun
 		}
 	}
