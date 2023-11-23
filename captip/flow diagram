@@ -1,0 +1,50 @@
+
+
+initial state is flutter...
+
+brim remote
+activity -> go pub activity chan -> select from activity chan -> submit to tiara with a flap...
+
+Note on activity (currently indexing by it....So...., activity needs to be as granular as needed to scale):
+-- Value is either flap, flutter, or glide...
+
+
+remoteactivity = flap:ack
+activity
+for loop until activity != glide { // glide means done....  and we exit and reset to flap:ack
+    for {
+        // Activity pump
+        submit flap:activity to tiara -> tiara returns flap:activity or flutter
+        activity = flutter activity... (p (flap) -> f (flutter))
+        if activity != remoteactivity {
+            remoteactivity = activity // flap:activity
+            fmt.Print(activity)
+            break
+        }
+        sleep(1 second)
+    }
+
+    remoteactivity = activity
+}
+
+
+cap tip local
+bootstrap init calls subscribe
+
+remoteactivity = flap:ack
+activity
+for loop until activity != glide { // glide means done....  and we exit and reset to flap:ack
+    for {
+        // Activity pump
+        submit flap:activity to tiara -> tiara returns flap:activity or flutter
+        activity = flutter activity... (p (flap) -> f (flutter))
+        if activity != remoteactivity {
+            remoteactivity = activity // flap:activity
+            fmt.Print(activity)
+            break
+        }
+        sleep(1 second)
+    }
+
+    remoteactivity = activity
+}
