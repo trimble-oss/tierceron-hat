@@ -15,7 +15,7 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
-func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
+func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 	fmt.Print(msg)
 }
 

@@ -16,7 +16,7 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
-	cap.FeatherCtlEmit(featherCtx, cap.MODE_PERCH, *featherCtx.SessionIdentifier, true)
+	cap.FeatherCtlEmit(featherCtx, string(cap.MODE_PERCH), *featherCtx.SessionIdentifier, true)
 	os.Exit(-1)
 	return nil
 }
