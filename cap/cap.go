@@ -6,6 +6,8 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -111,14 +113,16 @@ func hasMode(msg []byte, mode byte) bool {
 	return false
 }
 
-func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
+func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) error {
 	buf := make([]byte, 50)
+	conn.SetDeadline(time.Time{})
 	for {
-		conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
+		fmt.Println("PluckReceive")
 		n, err := conn.Read(buf)
+		conn.SetReadBuffer(n)
 		if err != nil {
-			conn.Close()
-			return
+			fmt.Printf("%v", err)
+			return err
 		}
 		message := buf[:n]
 
@@ -127,17 +131,14 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 			if len(message) > 2 {
 				if _, ok := penseFeatherPluckMap.Pop(string(message[2:])); ok {
 					conn.Write([]byte{MODE_PLUCK})
-					conn.Close()
-					return
+					return err
 				} else {
 					conn.Write([]byte{MOID_VOID})
-					conn.Close()
-					return
+					return err
 				}
 			}
 		} else {
-			conn.Close()
-			return
+			return err
 		}
 	}
 }
@@ -264,13 +265,22 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 		if pluckListener, err := kcp.ListenWithOptions(hostAddr+"1", nil, 0, 0); err == nil {
 			for {
 				pluckS, err := pluckListener.AcceptKCP()
+				fmt.Println("PluckReceive")
 				if err != nil {
+					time.Sleep(time.Second)
 					continue
 				}
-				if acceptRemote(FEATHER_COMMON, pluckS.RemoteAddr().String()) {
-					go handlePluck(pluckS, acceptRemote)
-				} else {
-					pluckS.Close()
+				for {
+					if acceptRemote(FEATHER_COMMON, pluckS.RemoteAddr().String()) {
+						if err := handlePluck(pluckS, acceptRemote); err != nil && (os.IsTimeout(err) || err == io.EOF) {
+							pluckS.Close()
+							break
+						}
+						time.Sleep(time.Second)
+					} else {
+						pluckS.Close()
+						break
+					}
 				}
 			}
 		}
@@ -303,26 +313,63 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
 	hostAddr := *featherCtx.HostAddr + "1"
 	responseBuf := make([]byte, 100)
 
-	for {
-		penseConn, penseErr := kcp.Dial(hostAddr)
-		if penseErr != nil {
-			time.Sleep(time.Second)
-			continue
-		}
+	var penseConn net.Conn
+	var penseErr error
+	retries := 0
 
-		defer penseConn.Close()
+retryEstablish:
+	penseConn, penseErr = kcp.Dial(hostAddr)
+	fmt.Println("PluckConn")
+	if penseErr != nil {
+		time.Sleep(time.Second)
+		if retries < 10 && penseErr != io.EOF {
+			retries = retries + 1
+			goto retryEstablish
+		} else {
+			// break immediately
+			return true, penseErr
+		}
+	}
+
+	defer penseConn.Close()
+
+	for {
+		fmt.Println("Pluck")
 		_, penseWriteErr := penseConn.Write(pluckPacket)
 		if penseWriteErr != nil {
-			time.Sleep(time.Second)
+			if os.IsTimeout(penseWriteErr) || penseWriteErr == io.EOF || strings.Contains(penseWriteErr.Error(), "timeout") {
+				if retries < 10 {
+					time.Sleep(time.Second)
+					retries = retries + 1
+					goto retryEstablish
+				} else {
+					// break immediately
+					return true, penseWriteErr
+				}
+			}
+			fmt.Printf("%v\n", penseWriteErr)
 			continue
 		}
 
-		penseConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		fmt.Println("PluckRead")
+		penseConn.SetDeadline(time.Now().Add(500 * time.Millisecond))
 		n, penseResponseErr := penseConn.Read(responseBuf)
+		fmt.Println("PluckReadEst")
 		if penseResponseErr != nil {
-			time.Sleep(time.Second)
+			if os.IsTimeout(penseResponseErr) || penseResponseErr == io.EOF {
+				if retries < 10 {
+					time.Sleep(time.Second)
+					retries = retries + 1
+					goto retryEstablish
+				} else {
+					// break immediately
+					return true, penseResponseErr
+				}
+			}
 			continue
 		}
+		retries = 0
+		fmt.Println("PluckReaded")
 
 		response := responseBuf[:n]
 		if hasMode(response, MODE_PLUCK) {
