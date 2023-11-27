@@ -1,6 +1,7 @@
 package cap
 
 import (
+	"bytes"
 	context "context"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -26,13 +27,22 @@ const (
 	FEATHER_SECRET = 1 << iota // SECRET 4
 )
 
-const (
-	MODE_PERCH = "c"
-	MOID_VOID  = "v"
-	MODE_PLUCK = "k"
-	MODE_FLAP  = "p"
-	MODE_GLIDE = "g"
-	MODE_GAZE  = "z"
+var (
+	MODE_PERCH byte = 'c'
+	MOID_VOID  byte = 'v'
+	MODE_PLUCK byte = 'k'
+	MODE_FLAP  byte = 'p'
+	MODE_GLIDE byte = 'g'
+	MODE_GAZE  byte = 'z'
+
+	PROTOCOL_DELIM byte = ':'
+)
+
+var (
+	PROTOCOL_HDR       string = "featherctl"
+	PROTOCOL_HDR_BYTES []byte = []byte(PROTOCOL_HDR)
+	MODE_FLAP_BYTES    []byte = []byte{MODE_FLAP}
+	MODE_GLIDE_BYTES   []byte = []byte{MODE_GLIDE}
 )
 
 const (
@@ -87,6 +97,20 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 
 var clientCodeMap = cmap.New[[][]byte]()
 
+func hasMode(msg []byte, mode byte) bool {
+	for _, b := range msg {
+		if b == '\x00' {
+			continue
+		} else if b == mode {
+			return true
+		} else {
+			return false
+		}
+
+	}
+	return false
+}
+
 func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 	buf := make([]byte, 50)
 	for {
@@ -96,17 +120,17 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 			conn.Close()
 			return
 		}
-		message := string(buf[:n])
-		messageParts := strings.Split(message, ":")
+		message := buf[:n]
 
-		if messageParts[0] == MODE_PLUCK {
-			if len(messageParts[1]) > 0 {
-				if _, ok := penseFeatherPluckMap.Pop(messageParts[1]); ok {
-					conn.Write([]byte(MODE_PLUCK))
+		if hasMode(message, MODE_PLUCK) {
+			message = bytes.TrimLeft(message, "\x00")
+			if len(message) > 2 {
+				if _, ok := penseFeatherPluckMap.Pop(string(message[2:])); ok {
+					conn.Write([]byte{MODE_PLUCK})
 					conn.Close()
 					return
 				} else {
-					conn.Write([]byte(MOID_VOID))
+					conn.Write([]byte{MOID_VOID})
 					conn.Close()
 					return
 				}
@@ -116,6 +140,24 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 			return
 		}
 	}
+}
+
+func bytesSplit(data []byte, separator byte) [][]byte {
+	var parts [][]byte
+
+	for start := 0; start < len(data); {
+		end := start
+
+		for end < len(data) && data[end] != separator {
+			end++
+		}
+
+		part := data[start:end]
+		parts = append(parts, part)
+		start = end + 1
+	}
+
+	return parts
 }
 
 func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
@@ -136,7 +178,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 					messageBytes, err = shamir.Combine(cremote...)
 				} else {
 					if acceptRemote(FEATHER_CTL, conn.RemoteAddr().String()) {
-						if ok && len(cremote) > 0 {
+						if ok && len(cremote) > 0 && len(cremote[0]) > 0 {
 							messageBytes = cremote[0]
 						} else {
 							// Race condition... Literally nothing can be done here other than
@@ -144,40 +186,42 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 							goto failover
 						}
 						cremote[0] = []byte{}
-						message := string(messageBytes)
+						message := messageBytes
 
-						messageParts := strings.Split(message, ":")
-						if messageParts[0] == handshakeCode {
+						messageParts := bytesSplit(message, PROTOCOL_DELIM)
+						if bytes.HasPrefix([]byte(handshakeCode), messageParts[0]) {
 							// handshake:featherctl:f|p|g:activity
-							if messageParts[1] == "featherctl" && len(messageParts) == 4 {
+							if bytes.HasPrefix(PROTOCOL_HDR_BYTES, messageParts[1]) && len(messageParts) == 4 {
 								var msg string = ""
 								var ok bool
-								if msg, ok = penseFeatherCtlCodeMap.Get(messageParts[3]); !ok {
+								activity := string(messageParts[3])
+								ctl := string(messageParts[2])
+								if msg, ok = penseFeatherCtlCodeMap.Get(activity); !ok {
 									// Default is Perch
-									msg = MODE_PERCH
+									msg = string(MODE_PERCH)
 								}
 
 								if len(messageParts[3]) < 50 && len(messageParts[2]) < 100 {
 
-									if messageParts[2] != MODE_PERCH && messageParts[2] != MODE_FLAP {
-										penseFeatherPluckMap.Set(messageParts[3], true)
+									if len(messageParts[2]) > 0 && messageParts[2][0] != MODE_PERCH && messageParts[2][0] != MODE_FLAP {
+										penseFeatherPluckMap.Set(activity, true)
 									}
 									switch {
-									case strings.HasPrefix(messageParts[2], MODE_PERCH): // Perch
-										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
-										msg = MODE_PERCH
-									case strings.HasPrefix(messageParts[2], MODE_FLAP): // Flap
-										if strings.HasPrefix(msg, MODE_GAZE) { // If had gaze, then flap...
-											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+									case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_PERCH: // Perch
+										penseFeatherCtlCodeMap.Set(activity, ctl)
+										msg = string(MODE_PERCH)
+									case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_FLAP: // Flap
+										if msg[0] == MODE_GAZE { // If had gaze, then flap...
+											penseFeatherCtlCodeMap.Set(activity, ctl)
 										}
-									case strings.HasPrefix(messageParts[2], MODE_GAZE): // Gaze
-										if msg != MODE_GLIDE { // Gliding to perch...
-											penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+									case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GAZE: // Gaze
+										if msg[0] != MODE_GLIDE { // Gliding to perch...
+											penseFeatherCtlCodeMap.Set(activity, ctl)
 										} else {
-											penseFeatherCtlCodeMap.Set(messageParts[3], MODE_PERCH)
+											penseFeatherCtlCodeMap.Set(activity, string(MODE_PERCH))
 										}
-									case strings.HasPrefix(messageParts[2], MODE_GLIDE): // Glide
-										penseFeatherCtlCodeMap.Set(messageParts[3], messageParts[2])
+									case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GLIDE: // Glide
+										penseFeatherCtlCodeMap.Set(activity, ctl)
 									}
 								}
 								conn.Write([]byte(msg))
@@ -190,7 +234,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 				if err == nil {
 					if acceptRemote(FEATHER_SECRET, conn.RemoteAddr().String()) {
 						message := string(messageBytes)
-						messageParts := strings.Split(message, ":")
+						messageParts := strings.Split(message, string(PROTOCOL_DELIM))
 						if messageParts[0] == handshakeCode {
 							if len(messageParts[1]) == 64 {
 								penseFeatherCodeMap.Set(messageParts[1], "")
@@ -200,7 +244,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 				}
 			}
 		failover:
-			conn.Write([]byte(" "))
+			conn.Write([]byte{' '})
 			defer conn.Close()
 			return
 		} else {
@@ -249,24 +293,29 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 }
 
 // Pluck is a blocking call
-func PluckCtlEmit(featherCtx *FeatherContext, pense string) (bool, error) {
+func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
+
+	pluckPacket := make([]byte, 2+len(pense)+1)
+	pluckPacket = append(pluckPacket, MODE_PLUCK)
+	pluckPacket = append(pluckPacket, PROTOCOL_DELIM)
+	pluckPacket = append(pluckPacket, pense...)
+
+	hostAddr := *featherCtx.HostAddr + "1"
+	responseBuf := make([]byte, 100)
 
 	for {
-		penseConn, penseErr := kcp.Dial(*featherCtx.HostAddr + "1")
-
+		penseConn, penseErr := kcp.Dial(hostAddr)
 		if penseErr != nil {
 			time.Sleep(time.Second)
 			continue
 		}
 
 		defer penseConn.Close()
-		_, penseWriteErr := penseConn.Write([]byte(MODE_PLUCK + ":" + pense))
+		_, penseWriteErr := penseConn.Write(pluckPacket)
 		if penseWriteErr != nil {
 			time.Sleep(time.Second)
 			continue
 		}
-
-		responseBuf := make([]byte, 100)
 
 		penseConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, penseResponseErr := penseConn.Read(responseBuf)
@@ -274,8 +323,9 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense string) (bool, error) {
 			time.Sleep(time.Second)
 			continue
 		}
-		response := string(responseBuf[:n])
-		if response == MODE_PLUCK {
+
+		response := responseBuf[:n]
+		if hasMode(response, MODE_PLUCK) {
 			return true, nil
 		}
 
@@ -284,7 +334,11 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense string) (bool, error) {
 		} else {
 			if breakImmediate, accErr := featherCtx.AcceptRemoteFunc(featherCtx, FEATHER_CTL, penseConn.RemoteAddr().String()); breakImmediate {
 				// Break, but don't exit encapsulating calling function.
-				return false, accErr
+				if accErr != nil {
+					return true, accErr
+				} else {
+					return false, accErr
+				}
 			} else {
 				// No break immediate, however only return if error is returned...
 				if accErr != nil {
@@ -295,23 +349,31 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense string) (bool, error) {
 	}
 }
 
-func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string, bypass bool) (string, error) {
-	if !bypass && modeCtlPack == MODE_FLAP {
+func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense []byte, bypass bool) ([]byte, error) {
+	if !bypass && modeCtlPack[0] == MODE_FLAP {
 		if breakImmediate, accErr := PluckCtlEmit(featherCtx, pense); breakImmediate && accErr != nil {
-			return "", accErr
+			return nil, accErr
 		}
 	}
+
 	key := pbkdf2.Key([]byte(*featherCtx.EncryptPass), []byte(*featherCtx.EncryptSalt), 1024, 32, sha1.New)
 	block, _ := kcp.NewAESBlockCrypt(key)
 
 	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
 	if penseErr != nil {
-		return "", penseErr
+		return nil, penseErr
 	}
 	defer penseConn.Close()
-	_, penseWriteErr := penseConn.Write([]byte(*featherCtx.HandshakeCode + ":featherctl:" + modeCtlPack + ":" + pense))
+	packet := []byte(*featherCtx.HandshakeCode)
+	packet = append(packet, PROTOCOL_DELIM)
+	packet = append(packet, []byte(PROTOCOL_HDR)...)
+	packet = append(packet, PROTOCOL_DELIM)
+	packet = append(packet, []byte(modeCtlPack)...)
+	packet = append(packet, PROTOCOL_DELIM)
+	packet = append(packet, pense...)
+	_, penseWriteErr := penseConn.Write(packet)
 	if penseWriteErr != nil {
-		return "", penseWriteErr
+		return nil, penseWriteErr
 	}
 
 	responseBuf := make([]byte, 100)
@@ -319,11 +381,21 @@ func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string
 	penseConn.SetReadDeadline(time.Now().Add(5000 * time.Millisecond))
 	n, penseResponseErr := penseConn.Read(responseBuf)
 
-	return string(responseBuf[:n]), penseResponseErr
+	return responseBuf[:n], penseResponseErr
+
+}
+
+func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string, bypass bool) (string, error) {
+	response, err := FeatherCtlEmitBinary(featherCtx, modeCtlPack, []byte(pense), bypass)
+	if response != nil {
+		return string(response), err
+	} else {
+		return "", err
+	}
 }
 
 func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
-	penseSplits, err := shamir.Split([]byte(*featherCtx.HandshakeCode+":"+pense), 12, 7)
+	penseSplits, err := shamir.Split([]byte(*featherCtx.HandshakeCode+string(PROTOCOL_DELIM)+pense), 12, 7)
 	if err != nil {
 		return nil, err
 	}
