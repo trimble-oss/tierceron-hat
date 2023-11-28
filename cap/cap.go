@@ -186,12 +186,12 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 							goto failover
 						}
 						cremote[0] = []byte{}
-						message := messageBytes
 
-						messageParts := bytesSplit(message, PROTOCOL_DELIM)
-						if bytes.HasPrefix([]byte(handshakeCode), messageParts[0]) {
-							// handshake:featherctl:f|p|g:activity
-							if bytes.HasPrefix(PROTOCOL_HDR_BYTES, messageParts[1]) && len(messageParts) == 4 {
+						if bytes.HasPrefix(messageBytes, PROTOCOL_HDR_BYTES) {
+							message := messageBytes
+							messageParts := bytesSplit(message, PROTOCOL_DELIM)
+							if bytes.HasPrefix([]byte(handshakeCode), messageParts[1]) && len(messageParts) == 4 {
+								// featherctl:handshakecode:f|p|g:activity
 								var msg string = ""
 								var ok bool
 								activity := string(messageParts[3])
@@ -364,9 +364,9 @@ func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense 
 		return nil, penseErr
 	}
 	defer penseConn.Close()
-	packet := []byte(*featherCtx.HandshakeCode)
+	packet := []byte(PROTOCOL_HDR)
 	packet = append(packet, PROTOCOL_DELIM)
-	packet = append(packet, []byte(PROTOCOL_HDR)...)
+	packet = append(packet, []byte(*featherCtx.HandshakeCode)...)
 	packet = append(packet, PROTOCOL_DELIM)
 	packet = append(packet, []byte(modeCtlPack)...)
 	packet = append(packet, PROTOCOL_DELIM)
