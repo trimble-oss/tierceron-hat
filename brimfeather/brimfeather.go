@@ -17,7 +17,7 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
 func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
-	fmt.Print(msg)
+	fmt.Printf("%s.", msg)
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
@@ -39,19 +39,27 @@ func queryAction(featherCtx *cap.FeatherContext, ctl string) (string, error) {
 
 func brimFeatherer(featherCtx *cap.FeatherContext) {
 
-	var modeCtlTrailChan chan string = make(chan string)
+	var modeCtlTrailChan chan string = make(chan string, 1)
 
 	go captiplib.FeatherCtlEmitter(featherCtx, modeCtlTrailChan, emote, queryAction)
 
 rerun:
 	atomic.StoreInt64(&featherCtx.RunState, cap.RUN_STARTED)
 	for _, modeCtl := range modeCtlTrail {
-		atomic.StoreInt64(&featherCtx.RunState, cap.RUNNING)
 		modeCtlTrailChan <- modeCtl
 		if atomic.LoadInt64(&featherCtx.RunState) == cap.RESETTING {
 			goto rerun
 		}
 	}
+	modeCtlTrailChan <- cap.CTL_COMPLETE
+	for {
+		if atomic.LoadInt64(&featherCtx.RunState) == cap.RUNNING {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
+	goto rerun
 }
 
 func main() {
@@ -64,7 +72,7 @@ func main() {
 	hostAddr := "127.0.0.1:1832"
 	handshakeCode := "ThisIsACode"
 
-	sessionIdentifier := "HelloWorld"
+	sessionIdentifier := "FeatherSessionOne"
 
 	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
 
