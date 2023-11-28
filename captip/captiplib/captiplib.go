@@ -79,7 +79,6 @@ func interruptFun(featherCtx *cap.FeatherContext, tickerInterrupt *time.Ticker) 
 }
 
 func FeatherCtl(featherCtx *cap.FeatherContext,
-	pense string,
 	emote func(*cap.FeatherContext, string, string),
 ) {
 	flapMode := string(cap.MODE_GAZE)

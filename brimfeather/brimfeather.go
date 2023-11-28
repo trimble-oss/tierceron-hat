@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/mrjrieke/hat/cap"
 	captiplib "github.com/mrjrieke/hat/captip/captiplib"
@@ -24,22 +25,23 @@ func interrupted(featherCtx *cap.FeatherContext) error {
 	return nil
 }
 
-func main() {
-	var interruptChan chan os.Signal = make(chan os.Signal, 5)
-	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
+func queryAction(featherCtx *cap.FeatherContext, ctl string) (string, error) {
+	if *featherCtx.SessionIdentifier == "FeatherSessionTwo" {
+		// More leasurely walk through the woods.
+		time.Sleep(time.Millisecond * 250)
+	} else {
+		if ctl == "thro" {
+			return captiplib.FeatherQueryCache(featherCtx, "I think")
+		}
+	}
+	return "", nil
+}
 
-	localHostAddr := ""
-	encryptPass := "Som18vhjqa72935h"
-	encryptSalt := "1cx7v89as7df89"
-	hostAddr := "127.0.0.1:1832"
-	handshakeCode := "ThisIsACode"
-	sessionIdentifier := "HelloWorld"
-
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
+func brimFeatherer(featherCtx *cap.FeatherContext) {
 
 	var modeCtlTrailChan chan string = make(chan string)
 
-	go captiplib.FeatherCtlEmitter(featherCtx, modeCtlTrailChan, emote, captiplib.FeatherQueryCache)
+	go captiplib.FeatherCtlEmitter(featherCtx, modeCtlTrailChan, emote, queryAction)
 
 rerun:
 	atomic.StoreInt64(&featherCtx.RunState, cap.RUN_STARTED)
@@ -50,4 +52,30 @@ rerun:
 			goto rerun
 		}
 	}
+}
+
+func main() {
+	var interruptChan chan os.Signal = make(chan os.Signal, 5)
+	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
+
+	localHostAddr := ""
+	encryptPass := "Som18vhjqa72935h"
+	encryptSalt := "1cx7v89as7df89"
+	hostAddr := "127.0.0.1:1832"
+	handshakeCode := "ThisIsACode"
+
+	sessionIdentifier := "HelloWorld"
+
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
+
+	go brimFeatherer(featherCtx)
+
+	sessionIdentifierTwo := "FeatherSessionTwo"
+
+	featherCtxTwo := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifierTwo, captiplib.AcceptRemote, interrupted)
+
+	go brimFeatherer(featherCtxTwo)
+
+	serverChan := make(chan struct{})
+	<-serverChan
 }
