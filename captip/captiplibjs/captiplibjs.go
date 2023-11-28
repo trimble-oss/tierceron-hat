@@ -36,6 +36,6 @@ func FeatherCtlInit(this js.Value, args []js.Value) any {
 }
 
 func FeatherCtl(this js.Value, args []js.Value) any {
-	go captiplib.FeatherCtl(gFeatherCtx, args[0].String(), emote)
+	go captiplib.FeatherCtl(gFeatherCtx, emote)
 	return map[string]any{"message": "featherctl"}
 }

@@ -30,7 +30,7 @@ func main() {
 	encryptSalt := "1cx7v89as7df89"
 	hostAddr := "127.0.0.1:1832"
 	handshakeCode := "ThisIsACode"
-	sessionIdentifier := "FeatherSessionOne"
+	sessionIdentifier := "FeatherSessionTwo"
 
 	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
 

@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -79,7 +80,6 @@ func interruptFun(featherCtx *cap.FeatherContext, tickerInterrupt *time.Ticker) 
 }
 
 func FeatherCtl(featherCtx *cap.FeatherContext,
-	pense string,
 	emote func(*cap.FeatherContext, string, string),
 ) {
 	flapMode := string(cap.MODE_GAZE)
@@ -87,7 +87,7 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 	var err error = errors.New("init")
 	bypass := err == nil || err.Error() != "init"
 	if emote == nil {
-		emote = func(featherCtx *cap.FeatherContext, flapMode string, msg string) { fmt.Print(msg) }
+		emote = func(featherCtx *cap.FeatherContext, flapMode string, msg string) { fmt.Printf("%s.", msg) }
 	}
 
 	for {
@@ -98,9 +98,20 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 		} else {
 			callFlap := flapMode
 			if err == nil {
-				if len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
+				if len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_PERCH {
 					ctl := strings.Split(ctlFlapMode, "_")
 					if len(ctl) > 1 {
+						if ctl[1] == cap.CTL_COMPLETE {
+							break
+						}
+					}
+
+				} else if len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
+					ctl := strings.Split(ctlFlapMode, "_")
+					if len(ctl) > 1 {
+						if ctl[1] == cap.CTL_COMPLETE {
+							break
+						}
 						emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s.", ctl[1]))
 					}
 					callFlap = string(cap.MODE_GAZE)
@@ -198,7 +209,9 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 	emote func(*cap.FeatherContext, []byte, string),
 	queryAction func(*cap.FeatherContext, string) (string, error)) (string, error) {
 	if emote == nil {
-		emote = func(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) { fmt.Print(msg) }
+		emote = func(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
+			fmt.Print(msg)
+		}
 	}
 	sessionIdBinary := []byte(*featherCtx.SessionIdentifier)
 
@@ -206,8 +219,18 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 	perching:
 		if ctlFlapMode, featherErr := cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_FLAP), sessionIdBinary, false); featherErr == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_GAZE {
 			emote(featherCtx, cap.MODE_FLAP_BYTES, MSG_FLY_AWAY)
+			// If it's still running, reset it...
+			atomic.CompareAndSwapInt64(&featherCtx.RunState, cap.RUNNING, cap.RESETTING)
 
 			for modeCtl := range modeCtlTrailChan {
+				atomic.StoreInt64(&featherCtx.RunState, cap.RUNNING)
+				if modeCtl == cap.CTL_COMPLETE {
+					flapMode := []byte{cap.MODE_PERCH, '_'}
+					flapMode = append(flapMode, []byte(cap.CTL_COMPLETE)...)
+
+					cap.FeatherCtlEmitBinary(featherCtx, string(flapMode), sessionIdBinary, true)
+					goto perching
+				}
 				if queryAction != nil {
 					queryAction(featherCtx, modeCtl)
 				}
@@ -216,12 +239,13 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 
 				ctlFlapMode := flapMode
 				var err error = errors.New("init")
-				emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s.", modeCtl))
+				emote(featherCtx, ctlFlapMode, modeCtl)
 
 				for {
 					if err == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_PERCH {
 						// Acknowledge perching...
 						cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_PERCH), sessionIdBinary, true)
+						atomic.StoreInt64(&featherCtx.RunState, cap.RESETTING)
 						goto perching
 					}
 
@@ -284,18 +308,31 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 				}
 			}
 			emote(featherCtx, ctlFlapMode, MSG_PERCH_AND_GAZE)
-			if atomic.LoadInt64(&featherCtx.RunState) == cap.RUNNING {
-				for {
-					// drain before reset.
-					select {
-					case <-modeCtlTrailChan:
-					default:
-						atomic.StoreInt64(&featherCtx.RunState, cap.RESETTING)
-						goto cleancomplete
+			if featherErr == nil {
+				if bytes.HasSuffix(ctlFlapMode, cap.CTL_COMPLETE_BYTES) {
+					// Picked up our own complete message.
+					flapMode := []byte{cap.MODE_PERCH, '_'}
+					flapMode = append(flapMode, []byte(cap.CTL_COMPLETE)...)
+
+					cap.FeatherCtlEmitBinary(featherCtx, string(flapMode), sessionIdBinary, true)
+
+				} else {
+					if atomic.LoadInt64(&featherCtx.RunState) == cap.RUNNING {
+						for {
+							// drain before reset.
+							select {
+							case <-modeCtlTrailChan:
+							default:
+								atomic.StoreInt64(&featherCtx.RunState, cap.RESETTING)
+								goto cleancomplete
+							}
+						}
+					cleancomplete:
 					}
 				}
-			cleancomplete:
+
 			}
+
 			err := interruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
 			if err != nil {
 				if featherCtx.InterruptHandlerFunc != nil {
