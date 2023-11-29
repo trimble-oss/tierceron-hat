@@ -220,15 +220,16 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 		if ctlFlapMode, featherErr := cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_FLAP), sessionIdBinary, false); featherErr == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_GAZE {
 			emote(featherCtx, cap.MODE_FLAP_BYTES, MSG_FLY_AWAY)
 			// If it's still running, reset it...
-			atomic.CompareAndSwapInt64(&featherCtx.RunState, cap.RUNNING, cap.RESETTING)
+			atomic.CompareAndSwapInt64(&featherCtx.RunState, cap.RUN_STARTED, cap.RESETTING)
 
 			for modeCtl := range modeCtlTrailChan {
 				atomic.StoreInt64(&featherCtx.RunState, cap.RUNNING)
 				if modeCtl == cap.CTL_COMPLETE {
-					flapMode := []byte{cap.MODE_PERCH, '_'}
+					flapMode := []byte{cap.MODE_GLIDE, '_'}
 					flapMode = append(flapMode, []byte(cap.CTL_COMPLETE)...)
 
 					cap.FeatherCtlEmitBinary(featherCtx, string(flapMode), sessionIdBinary, true)
+					atomic.CompareAndSwapInt64(&featherCtx.RunState, cap.RUNNING, cap.RUN_STARTED)
 					goto perching
 				}
 				if queryAction != nil {
@@ -245,7 +246,6 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 					if err == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_PERCH {
 						// Acknowledge perching...
 						cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_PERCH), sessionIdBinary, true)
-						atomic.StoreInt64(&featherCtx.RunState, cap.RESETTING)
 						goto perching
 					}
 
@@ -311,10 +311,11 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 			if featherErr == nil {
 				if bytes.HasSuffix(ctlFlapMode, cap.CTL_COMPLETE_BYTES) {
 					// Picked up our own complete message.
-					flapMode := []byte{cap.MODE_PERCH, '_'}
+					flapMode := []byte{cap.MODE_GLIDE, '_'}
 					flapMode = append(flapMode, []byte(cap.CTL_COMPLETE)...)
 
 					cap.FeatherCtlEmitBinary(featherCtx, string(flapMode), sessionIdBinary, true)
+					atomic.CompareAndSwapInt64(&featherCtx.RunState, cap.RUNNING, cap.RUN_STARTED)
 
 				} else {
 					if atomic.LoadInt64(&featherCtx.RunState) == cap.RUNNING {
@@ -323,7 +324,6 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 							select {
 							case <-modeCtlTrailChan:
 							default:
-								atomic.StoreInt64(&featherCtx.RunState, cap.RESETTING)
 								goto cleancomplete
 							}
 						}
