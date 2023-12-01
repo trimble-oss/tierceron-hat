@@ -68,7 +68,7 @@ type FeatherContext struct {
 	MultiSecondInterruptTicker     *time.Ticker
 	FifteenSecondInterruptTicker   *time.Ticker
 	ThirtySecondInterruptTicker    *time.Ticker
-	Log                            log.Logger
+	Log                            *log.Logger
 }
 
 var penseMemoryMap map[string]string = map[string]string{}
