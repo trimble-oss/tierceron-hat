@@ -112,7 +112,7 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 						if ctl[1] == cap.CTL_COMPLETE {
 							break
 						}
-						emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s.", ctl[1]))
+						emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s", ctl[1]))
 					}
 					callFlap = string(cap.MODE_GAZE)
 					gazeCnt = 0
