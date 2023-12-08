@@ -60,6 +60,7 @@ type FeatherContext struct {
 	HostAddr                       *string
 	HandshakeCode                  *string
 	SessionIdentifier              *string
+	Env                            *string
 	AcceptRemoteFunc               func(*FeatherContext, int, string) (bool, error)
 	InterruptHandlerFunc           func(*FeatherContext) error
 	InterruptChan                  chan os.Signal

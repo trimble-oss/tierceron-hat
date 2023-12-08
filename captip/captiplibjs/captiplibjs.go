@@ -25,12 +25,13 @@ func FeatherCtlInit(this js.Value, args []js.Value) any {
 	hostAddr := args[2].String()
 	handshakeCode := args[3].String()
 	sessionIdentifier := args[4].String()
+	someEnv := args[5].String()
 
 	var interruptChan chan os.Signal
 
 	localHostAddr := ""
 
-	gFeatherCtx = captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
+	gFeatherCtx = captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &someEnv, captiplib.AcceptRemote, interrupted)
 
 	return map[string]any{"message": ""}
 }

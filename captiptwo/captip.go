@@ -31,8 +31,9 @@ func main() {
 	hostAddr := "127.0.0.1:1832"
 	handshakeCode := "ThisIsACode"
 	sessionIdentifier := "FeatherSessionTwo"
+	env := "SomeEnv"
 
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, captiplib.AcceptRemote, interrupted)
 
 	fmt.Printf("\nFirst run\n")
 	captiplib.FeatherCtl(featherCtx, emote)
