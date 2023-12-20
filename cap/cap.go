@@ -6,6 +6,8 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -115,32 +117,43 @@ func hasMode(msg []byte, mode byte) bool {
 }
 
 func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
+
 	buf := make([]byte, 50)
 	for {
-		conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
-		n, err := conn.Read(buf)
-		if err != nil {
-			conn.Close()
-			return
-		}
-		message := buf[:n]
+		if acceptRemote(FEATHER_COMMON, conn.RemoteAddr().String()) {
+			lastReadN := 0
+			for {
+				time.Sleep(time.Second * 3)
+				conn.SetDeadline(time.Now().Add(15 * time.Second))
+				n, err := conn.Read(buf)
+				if lastReadN != n {
+					lastReadN = n
+					conn.SetReadBuffer(lastReadN)
+				}
+				if err != nil {
+					conn.Close()
+					return
+				}
+				message := buf[:n]
 
-		if hasMode(message, MODE_PLUCK) {
-			message = bytes.TrimLeft(message, "\x00")
-			if len(message) > 2 {
-				if _, ok := penseFeatherPluckMap.Pop(string(message[2:])); ok {
-					conn.Write([]byte{MODE_PLUCK})
-					conn.Close()
-					return
+				if hasMode(message, MODE_PLUCK) {
+					message = bytes.TrimLeft(message, "\x00")
+					if len(message) > 2 {
+						if _, ok := penseFeatherPluckMap.Pop(string(message[2:])); ok {
+							conn.Write([]byte{MODE_PLUCK})
+							continue
+						} else {
+							conn.Write([]byte{MOID_VOID})
+							continue
+						}
+					}
 				} else {
-					conn.Write([]byte{MOID_VOID})
-					conn.Close()
-					return
+					continue
 				}
 			}
 		} else {
 			conn.Close()
-			return
+			break
 		}
 	}
 }
@@ -251,6 +264,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 				if ccmap, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
 					clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, append([]byte{}, buf[:n]...)))
 				}
+				defer conn.Close()
 			}
 		}
 	}
@@ -262,13 +276,14 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 			for {
 				pluckS, err := pluckListener.AcceptKCP()
 				if err != nil {
+					if errors.Is(err, os.ErrDeadlineExceeded) || err.Error() == "timeout" || err == io.EOF {
+						pluckS.Close()
+					}
+					time.Sleep(time.Second)
 					continue
 				}
-				if acceptRemote(FEATHER_COMMON, pluckS.RemoteAddr().String()) {
-					go handlePluck(pluckS, acceptRemote)
-				} else {
-					pluckS.Close()
-				}
+
+				go handlePluck(pluckS, acceptRemote)
 			}
 		}
 	}()
@@ -300,26 +315,63 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
 	hostAddr := *featherCtx.HostAddr + "1"
 	responseBuf := make([]byte, 100)
 
-	for {
-		penseConn, penseErr := kcp.Dial(hostAddr)
-		if penseErr != nil {
-			time.Sleep(time.Second)
-			continue
-		}
+	var penseConn net.Conn
+	var penseErr error
+	retries := 0
 
-		defer penseConn.Close()
+retryEstablish:
+	penseConn, penseErr = kcp.Dial(hostAddr)
+	if penseErr != nil {
+		time.Sleep(time.Second)
+		if retries < 10 && penseErr != io.EOF {
+			retries = retries + 1
+			penseConn.Close()
+			goto retryEstablish
+		} else {
+			// break immediately
+			return true, penseErr
+		}
+	}
+
+	defer penseConn.Close()
+
+	for {
+		time.Sleep(3 * time.Second)
+		penseConn.SetDeadline(time.Time{})
 		_, penseWriteErr := penseConn.Write(pluckPacket)
 		if penseWriteErr != nil {
-			time.Sleep(time.Second)
+			if errors.Is(penseWriteErr, os.ErrDeadlineExceeded) || penseWriteErr.Error() == "timeout" || penseWriteErr == io.EOF || strings.Contains(penseWriteErr.Error(), "timeout") {
+				if retries < 10 {
+					time.Sleep(time.Second)
+					retries = retries + 1
+					penseConn.Close()
+					goto retryEstablish
+				} else {
+					// break immediately
+					return true, penseWriteErr
+				}
+			}
 			continue
 		}
 
-		penseConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		penseConn.SetDeadline(time.Time{})
 		n, penseResponseErr := penseConn.Read(responseBuf)
 		if penseResponseErr != nil {
-			time.Sleep(time.Second)
+			if errors.Is(penseResponseErr, os.ErrDeadlineExceeded) || penseResponseErr.Error() == "timeout" || penseResponseErr == io.EOF {
+				if retries < 10 {
+					time.Sleep(time.Second)
+					retries = retries + 1
+					penseConn.Close()
+					goto retryEstablish
+				} else {
+					// break immediately
+					penseConn.Close()
+					return true, penseResponseErr
+				}
+			}
 			continue
 		}
+		retries = 0
 
 		response := responseBuf[:n]
 		if hasMode(response, MODE_PLUCK) {
@@ -330,10 +382,10 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
 			return false, nil
 		} else {
 			if breakImmediate, accErr := featherCtx.AcceptRemoteFunc(featherCtx, FEATHER_CTL, penseConn.RemoteAddr().String()); breakImmediate {
-				// Break, but don't exit encapsulating calling function.
 				if accErr != nil {
 					return true, accErr
 				} else {
+					// Break, but don't exit encapsulating calling function.
 					return false, accErr
 				}
 			} else {
