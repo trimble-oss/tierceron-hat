@@ -74,13 +74,13 @@ func main() {
 
 	sessionIdentifier := "FeatherSessionOne"
 
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemote, interrupted)
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, captiplib.AcceptRemoteNoTimeout, interrupted)
 
 	go brimFeatherer(featherCtx)
 
 	sessionIdentifierTwo := "FeatherSessionTwo"
 
-	featherCtxTwo := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifierTwo, captiplib.AcceptRemote, interrupted)
+	featherCtxTwo := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifierTwo, captiplib.AcceptRemoteNoTimeout, interrupted)
 
 	go brimFeatherer(featherCtxTwo)
 

@@ -65,6 +65,22 @@ func acceptInterruptFun(featherCtx *cap.FeatherContext, tickerContinue *time.Tic
 	return true, errors.New("not possible")
 }
 
+func acceptInterruptNoTimeoutFun(featherCtx *cap.FeatherContext, tickerContinue *time.Ticker) (bool, error) {
+	select {
+	case <-featherCtx.InterruptChan:
+		cap.FeatherCtlEmit(featherCtx, string(cap.MODE_PERCH), *featherCtx.SessionIdentifier, true)
+		return true, errors.New(YOU_SHALL_NOT_PASS)
+	case <-tickerContinue.C:
+		// don't break... continue...
+		return false, nil
+	}
+	return true, errors.New("not possible")
+}
+
+func AcceptRemoteNoTimeout(featherCtx *cap.FeatherContext, x int, y string) (bool, error) {
+	return acceptInterruptNoTimeoutFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
+}
+
 func AcceptRemote(featherCtx *cap.FeatherContext, x int, y string) (bool, error) {
 	return acceptInterruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker, featherCtx.FifteenSecondInterruptTicker, featherCtx.ThirtySecondInterruptTicker)
 }
