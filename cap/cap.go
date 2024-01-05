@@ -337,7 +337,7 @@ retryEstablish:
 
 	for {
 		time.Sleep(3 * time.Second)
-		penseConn.SetDeadline(time.Time{})
+		penseConn.SetDeadline(time.Now().Add(5 * time.Second))
 		_, penseWriteErr := penseConn.Write(pluckPacket)
 		if penseWriteErr != nil {
 			if errors.Is(penseWriteErr, os.ErrDeadlineExceeded) || penseWriteErr.Error() == "timeout" || penseWriteErr == io.EOF || strings.Contains(penseWriteErr.Error(), "timeout") {
@@ -354,7 +354,7 @@ retryEstablish:
 			continue
 		}
 
-		penseConn.SetDeadline(time.Time{})
+		penseConn.SetDeadline(time.Now().Add(5 * time.Second))
 		n, penseResponseErr := penseConn.Read(responseBuf)
 		if penseResponseErr != nil {
 			if errors.Is(penseResponseErr, os.ErrDeadlineExceeded) || penseResponseErr.Error() == "timeout" || penseResponseErr == io.EOF {
