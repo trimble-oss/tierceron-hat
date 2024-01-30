@@ -106,13 +106,14 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 					conn.Close()
 					continue
 				}
-				defer peerExe.Close()
 
 				h := sha256.New()
 				if _, err := io.Copy(h, peerExe); !skipPathControls && err != nil {
+					peerExe.Close()
 					conn.Close()
 					continue
 				}
+				peerExe.Close()
 
 				if skipPathControls || expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
 					messageBytes := make([]byte, 64)
