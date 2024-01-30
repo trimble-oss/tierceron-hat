@@ -119,6 +119,7 @@ func TapWriter(pense string) (map[string]string, error) {
 		return nil, penseErr
 	}
 	_, penseWriteErr := penseConn.Write([]byte(pense))
+	defer penseConn.Close()
 	if penseWriteErr != nil {
 		return nil, penseWriteErr
 	}
