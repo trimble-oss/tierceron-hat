@@ -80,6 +80,7 @@ func Tap(target string, expectedSha256 string) error {
 					conn.Close()
 					continue
 				}
+				defer peerExe.Close()
 
 				h := sha256.New()
 				if _, err := io.Copy(h, peerExe); err != nil {
