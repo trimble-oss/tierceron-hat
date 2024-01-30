@@ -80,13 +80,14 @@ func Tap(target string, expectedSha256 string) error {
 					conn.Close()
 					continue
 				}
-				defer peerExe.Close()
 
 				h := sha256.New()
 				if _, err := io.Copy(h, peerExe); err != nil {
+					peerExe.Close()
 					conn.Close()
 					continue
 				}
+				peerExe.Close()
 
 				if expectedSha256 == hex.EncodeToString(h.Sum(nil)) {
 					messageBytes := make([]byte, 64)
