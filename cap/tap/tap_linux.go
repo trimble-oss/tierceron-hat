@@ -11,11 +11,9 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"os/user"
 	"strconv"
-	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -93,18 +91,7 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 				continue
 			}
 
-			// Workaround linux file handle leak in readlink lib...
-			cmd := exec.Command("/usr/bin/readlink", "-f", "/proc/"+strconv.Itoa(int(cred.Pid))+"/exe")
-			pathBytes, linkErr := cmd.Output()
-
-			if linkErr != nil {
-				os.Exit(-1)
-			}
-			path := strings.TrimSpace(string(pathBytes))
-			// End workaround...
-
-			//			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
-			//			pathBytes, exePathErr := cmd.Output()
+			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
 
 			if !skipPathControls && linkErr != nil {
 				conn.Close()
@@ -112,9 +99,9 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 			}
 
 			// 2nd check.
-			if skipPathControls || string(path) == target {
+			if skipPathControls || path == target {
 				// 3rd check.
-				peerExe, err := os.Open(string(path))
+				peerExe, err := os.Open(path)
 				if !skipPathControls && err != nil {
 					conn.Close()
 					continue
