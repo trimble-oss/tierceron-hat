@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
@@ -91,7 +92,7 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 				continue
 			}
 
-			path, linkErr := os.Readlink("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
+			path, linkErr := filepath.EvalSymlinks("/proc/" + strconv.Itoa(int(cred.Pid)) + "/exe")
 
 			if !skipPathControls && linkErr != nil {
 				conn.Close()
