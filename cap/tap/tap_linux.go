@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
@@ -21,6 +22,8 @@ import (
 
 const penseSocket = "./snap.sock"
 const penseDir = "/tmp/trccarrier/"
+
+var penseDirSocket = filepath.Clean(penseDir + penseSocket)
 
 func Tap(target string, expectedSha256 string, group string, skipPathControls bool) error {
 	// Tap always starts with a clean slate.
@@ -38,12 +41,12 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 	}
 	os.Chown(penseDir, -1, azureDeployGID)
 	os.Chmod(penseDir, 0770)
-	os.Remove(penseDir + penseSocket)
+	os.Remove(penseDirSocket)
 	origUmask := syscall.Umask(0777)
-	listener, listenErr := net.Listen("unix", penseDir+penseSocket)
+	listener, listenErr := net.Listen("unix", penseDirSocket)
 	syscall.Umask(origUmask)
-	os.Chown(penseDir+penseSocket, -1, azureDeployGID)
-	os.Chmod(penseDir+penseSocket, 0770)
+	os.Chown(penseDirSocket, -1, azureDeployGID)
+	os.Chmod(penseDirSocket, 0770)
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGABRT)
@@ -53,7 +56,7 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 		if listener != nil {
 			listener.Close()
 		}
-		os.Remove(penseDir + penseSocket)
+		os.Remove(penseDirSocket)
 		os.Exit(0)
 	}(signalChan)
 
@@ -141,12 +144,12 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 }
 
 func TapWriter(pense string) (map[string]string, error) {
-	penseConn, penseErr := net.Dial("unix", penseDir+penseSocket)
+	penseConn, penseErr := net.Dial("unix", penseDirSocket)
 	if penseErr != nil {
 		return nil, penseErr
 	}
-	defer penseConn.Close()
 	_, penseWriteErr := penseConn.Write([]byte(pense))
+	defer penseConn.Close()
 	if penseWriteErr != nil {
 		return nil, penseWriteErr
 	}
