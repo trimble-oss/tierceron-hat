@@ -5,7 +5,7 @@ package tap
 
 import "errors"
 
-func Tap(target string, expectedSha256 string) error {
+func Tap(tapMap map[string]string) error {
 	// Unsupported
 	return errors.New("Unsupported")
 }

@@ -19,7 +19,7 @@ import (
 
 const penseSocket = "./snap.sock"
 
-func Tap(target string, expectedSha256 string) error {
+func Tap(tapMap map[string]string) error {
 	listener, err := net.Listen("unix", penseSocket)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func Tap(target string, expectedSha256 string) error {
 			defer conn.Close()
 
 			// 2nd check.
-			if path == target {
+			if expectedSha256, ok := tapMap[path]; ok {
 				// 3rd check.
 				peerExe, err := os.Open(path)
 				if err != nil {

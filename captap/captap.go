@@ -17,6 +17,7 @@ func main() {
 	}
 	exePath := filepath.Dir(ex)
 	brimPath := strings.Replace(exePath, "/Cap", "/brim", 1)
-	go tap.Tap(brimPath, "f19431f322ea015ef871d267cc75e58b73d16617f9ff47ed7e0f0c1dbfb276b5")
+	tapMap := map[string]string{brimPath: "2c1d03a2869e2040bbd125661f49d4bca2b9b0751ec92d0119a744edc31932ff"}
+	go tap.Tap(tapMap)
 	cap.TapServer("127.0.0.1:1534")
 }

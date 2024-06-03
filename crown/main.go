@@ -15,7 +15,8 @@ func main() {
 		os.Exit(-1)
 	}
 	brimPath := strings.Replace(exePath, "/crown", "/brim", 1)
-	go tap.Tap(brimPath, "0904d372b7e10f44c7ea99b674d9ec19f7d2576a9d1e49c9530b37c45dd3eee6")
+	tapMap := map[string]string{brimPath: "2c1d03a2869e2040bbd125661f49d4bca2b9b0751ec92d0119a744edc31932ff"}
+	go tap.Tap(tapMap)
 
 	tap.TapEyeRemember("eye", "rememeber")
 	cap.TapMemorize("I think", "therefore I am.")
