@@ -25,9 +25,10 @@ const penseDir = "/tmp/trccarrier/"
 
 var penseDirSocket = filepath.Clean(penseDir + penseSocket)
 
-func Tap(target string, expectedSha256 string, group string, skipPathControls bool) error {
+func Tap(tapMap map[string]string, group string, skipPathControls bool) error {
 	// Tap always starts with a clean slate.
 	err := os.MkdirAll(penseDir, 0770)
+	listener, err := net.Listen("unix", penseSocket)
 	if err != nil {
 		return errors.Join(errors.New("Dir create error"), err)
 	}
@@ -102,7 +103,7 @@ func Tap(target string, expectedSha256 string, group string, skipPathControls bo
 			}
 
 			// 2nd check.
-			if skipPathControls || path == target {
+			if expectedSha256, ok := tapMap[path]; skipPathControls || ok {
 				// 3rd check.
 				peerExe, err := os.Open(path)
 				if !skipPathControls && err != nil {
