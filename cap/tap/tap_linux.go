@@ -28,7 +28,6 @@ var penseDirSocket = filepath.Clean(penseDir + penseSocket)
 func Tap(tapMap map[string]string, group string, skipPathControls bool) error {
 	// Tap always starts with a clean slate.
 	err := os.MkdirAll(penseDir, 0770)
-	listener, err := net.Listen("unix", penseSocket)
 	if err != nil {
 		return errors.Join(errors.New("Dir create error"), err)
 	}
