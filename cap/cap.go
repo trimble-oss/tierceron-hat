@@ -81,6 +81,15 @@ var penseFeatherMemoryMap map[string]string = map[string]string{}
 var penseFeatherPluckMap = cmap.New[bool]()
 var penseFeatherCtlCodeMap = cmap.New[string]()
 
+// CodeSaltGuardFn is expected to return a hex.EncodeToString encoded salt
+type CodeSaltGuardFn func() string
+
+var codeSaltGuardFn CodeSaltGuardFn = nil
+
+func TapInitCodeSaltGuard(csgFn CodeSaltGuardFn) {
+	codeSaltGuardFn = csgFn
+}
+
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
 	if err != nil {
@@ -198,7 +207,20 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 						message := string(messageBytes)
 						messageParts := strings.Split(message, string(PROTOCOL_DELIM))
 						if messageParts[0] == handshakeCode {
-							if len(messageParts[1]) == 64 {
+							featherCode := messageParts[1]
+							if codeSaltGuardFn != nil {
+								codeSalt := codeSaltGuardFn()
+								if len(codeSalt) > 0 {
+									if strings.HasSuffix(featherCode, codeSalt) {
+										featherCode = strings.TrimSuffix(featherCode, codeSalt)
+									} else {
+										// Invalid
+										featherCode = ""
+									}
+								}
+
+							}
+							if len(featherCode) == 64 {
 								penseFeatherCodeMap.Set(messageParts[1], "")
 							}
 						}
