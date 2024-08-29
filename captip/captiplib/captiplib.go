@@ -15,7 +15,9 @@ import (
 
 	"github.com/trimble-oss/tierceron-hat/cap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 func init() {
@@ -187,7 +189,37 @@ func randomString(n int) string {
 }
 
 func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, error) {
-	penseCode := randomString(7 + rand.Intn(7))
+	conn, err := grpc.Dial(*featherCtx.LocalHostAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	c := cap.NewCapClient(conn)
+	// Contact the server and print out its response.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	var r *cap.PenseReply
+	retry := 0
+
+	for {
+		_, err := c.Pense(ctx, &cap.PenseRequest{Pense: "", PenseIndex: ""})
+		if err != nil {
+			st, ok := status.FromError(err)
+
+			if ok && (retry < 5) && st.Code() == codes.Unavailable {
+				retry = retry + 1
+				continue
+			} else {
+				return "", err
+			}
+		} else {
+			break
+		}
+	}
+
+	penseCode := randomString(12 + rand.Intn(7))
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
 
@@ -196,20 +228,22 @@ func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, er
 		return "", featherErr
 	}
 
-	conn, err := grpc.Dial(*featherCtx.LocalHostAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	c := cap.NewCapClient(conn)
+	retry = 0
 
-	// Contact the server and print out its response.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	for {
+		r, err = c.Pense(ctx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
+		if err != nil {
+			st, ok := status.FromError(err)
 
-	r, err := c.Pense(ctx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
-	if err != nil {
-		return "", err
+			if ok && (retry < 5) && st.Code() == codes.Unavailable {
+				retry = retry + 1
+				continue
+			} else {
+				return "", err
+			}
+		} else {
+			break
+		}
 	}
 
 	return r.GetPense(), nil
