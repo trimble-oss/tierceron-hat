@@ -222,6 +222,7 @@ func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, er
 	penseCode := randomString(12 + rand.Intn(7))
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
+	penseSum = penseSum + cap.CodeSaltGuardFn()
 
 	_, featherErr := cap.FeatherWriter(featherCtx, penseSum)
 	if featherErr != nil {
