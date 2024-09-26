@@ -15,7 +15,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -26,12 +25,9 @@ const penseSocket = "./snap.sock"
 var (
 	penseDir string = "/tmp/trccarrier/"
 )
-var onceDirInit sync.Once
 
 func TapInit(pd string) {
-	onceDirInit.Do(func() {
-		penseDir = pd
-	})
+	penseDir = pd
 }
 
 //const penseDir = "/tmp/trccarrier/"
