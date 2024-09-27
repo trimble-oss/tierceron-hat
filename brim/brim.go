@@ -20,6 +20,8 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+const penseDir = "/tmp/trccarrier/"
+
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 func randomString(n int) string {
@@ -66,7 +68,7 @@ func penseQuery(pense string) {
 		}
 	}
 
-	eyeMap, err := tap.TapWriter(penseSum)
+	eyeMap, err := tap.TapWriter(penseDir, penseSum)
 	if err != nil {
 		log.Fatalf("Failure to communicate: %v", err)
 	}
