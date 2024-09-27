@@ -22,20 +22,11 @@ import (
 
 const penseSocket = "./snap.sock"
 
-var (
-	penseDir string = "/tmp/trccarrier/"
-)
-
-func TapInit(pd string) {
-	penseDir = pd
-}
-
-//const penseDir = "/tmp/trccarrier/"
-
-var penseDirSocket = filepath.Clean(penseDir + penseSocket)
-
-func Tap(tapMap map[string]string, group string, skipPathControls bool) error {
+func Tap(penseDir string, tapMap map[string]string, group string, skipPathControls bool) error {
 	// Tap always starts with a clean slate.
+
+	var penseDirSocket = filepath.Clean(penseDir + penseSocket)
+
 	err := os.MkdirAll(penseDir, 0770)
 	if err != nil {
 		return errors.Join(errors.New("Dir create error"), err)
@@ -152,7 +143,8 @@ func Tap(tapMap map[string]string, group string, skipPathControls bool) error {
 	}
 }
 
-func TapWriter(pense string) (map[string]string, error) {
+func TapWriter(penseDir string, pense string) (map[string]string, error) {
+	var penseDirSocket = filepath.Clean(penseDir + penseSocket)
 	penseConn, penseErr := net.Dial("unix", penseDirSocket)
 	if penseErr != nil {
 		return nil, penseErr

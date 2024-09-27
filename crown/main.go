@@ -8,6 +8,8 @@ import (
 	"github.com/trimble-oss/tierceron-hat/cap/tap"
 )
 
+const penseDir = "/tmp/trccarrier/"
+
 // The original crown
 func main() {
 	exePath, exePathErr := os.Readlink("/proc/self/exe")
@@ -16,7 +18,7 @@ func main() {
 	}
 	brimPath := strings.Replace(exePath, "/crown", "/brim", 1)
 	tapMap := map[string]string{brimPath: "2c1d03a2869e2040bbd125661f49d4bca2b9b0751ec92d0119a744edc31932ff"}
-	go tap.Tap(tapMap, "", false)
+	go tap.Tap(penseDir, tapMap, "", false)
 
 	tap.TapEyeRemember("eye", "rememeber")
 	cap.TapMemorize("I think", "therefore I am.")
