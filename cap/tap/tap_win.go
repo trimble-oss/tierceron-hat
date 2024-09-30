@@ -10,12 +10,12 @@ func TapInit(pd string) {
 	return
 }
 
-func Tap(tapMap map[string]string, group string, skipPathControls bool) error {
+func Tap(penseDir string, tapMap map[string]string, group string, skipPathControls bool) error {
 	// Unsupported
 	return errors.New("Unsupported")
 }
 
-func TapWriter(pense string) (map[string]string, error) {
+func TapWriter(penseDir string, pense string) (map[string]string, error) {
 	// Unsupported
 	return nil, errors.New("Unsupported")
 }
