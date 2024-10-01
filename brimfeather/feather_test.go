@@ -1,11 +1,12 @@
 package main
 
 import (
-	cap2 "github.com/trimble-oss/tierceron-hat/cap"
-	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
 	"os"
 	"sync"
 	"testing"
+
+	cap2 "github.com/trimble-oss/tierceron-hat/cap"
+	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
 )
 
 func featherInterrupted(featherCtx *cap2.FeatherContext) error {
@@ -22,10 +23,17 @@ func TestGetSaltyGuardian(t *testing.T) {
 	go func() {
 		go cap2.Feather("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", func(int, string) bool { return true })
 
-		cap2.TapFeather("I think", "therefore I am.")
-		cap2.TapFeather("It is not enough to have a good mind.", "The main thing is to use it well.")
+		keyvar := new(string)
+		*keyvar = "therefore I am."
+		cap2.TapFeather("I think", keyvar)
 
-		cap2.TapFeather("Ponder", "a feather.")
+		keyvar2 := new(string)
+		*keyvar2 = "The main thing is to use it well."
+		cap2.TapFeather("It is not enough to have a good mind.", keyvar2)
+
+		keyvar3 := new(string)
+		*keyvar3 = "a feather."
+		cap2.TapFeather("Ponder", keyvar3)
 
 		go cap2.TapServer("127.0.0.1:1534")
 		serverStart.Done()
