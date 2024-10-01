@@ -74,10 +74,10 @@ type FeatherContext struct {
 	Log                            *log.Logger
 }
 
-var penseMemoryMap map[string]string = map[string]string{}
+var penseMemoryMap map[string]*string = map[string]*string{}
 
 var penseFeatherCodeMap = cmap.New[string]()
-var penseFeatherMemoryMap map[string]string = map[string]string{}
+var penseFeatherMemoryMap map[string]*string = map[string]*string{}
 
 var penseFeatherPluckMap = cmap.New[bool]()
 var penseFeatherCtlCodeMap = cmap.New[string]()
@@ -491,12 +491,12 @@ func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
 	return responseBuf[:n], penseResponseErr
 }
 
-func TapFeather(penseIndex, memory string) {
+func TapFeather(penseIndex string, memory *string) {
 	penseMemoryMap[penseIndex] = memory
 	penseFeatherMemoryMap[penseIndex] = memory
 }
 
-func TapMemorize(penseIndex, memory string) {
+func TapMemorize(penseIndex string, memory *string) {
 	penseMemoryMap[penseIndex] = memory
 }
 
@@ -511,7 +511,7 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 
 	if _, penseCodeOk := tap.PenseCode(penseCode); penseCodeOk {
 		if pense, penseOk := penseMemoryMap[penseRequest.PenseIndex]; penseOk {
-			return &PenseReply{Pense: pense}, nil
+			return &PenseReply{Pense: *pense}, nil
 		} else {
 			return &PenseReply{Pense: "Pense undefined"}, nil
 		}
@@ -520,7 +520,7 @@ func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*
 		if _, penseCodeOk := penseFeatherCodeMap.Get(penseCode); penseCodeOk {
 			penseFeatherCodeMap.Remove(penseCode)
 			if pense, penseOk := penseFeatherMemoryMap[penseRequest.PenseIndex]; penseOk {
-				return &PenseReply{Pense: pense}, nil
+				return &PenseReply{Pense: *pense}, nil
 			} else {
 				return &PenseReply{Pense: "Pense undefined"}, nil
 			}

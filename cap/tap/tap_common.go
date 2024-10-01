@@ -1,9 +1,9 @@
 package tap
 
-var penseEyeMap map[string]string = map[string]string{}
+var penseEyeMap map[string]*string = map[string]*string{}
 var penseCodeMap map[string]string = map[string]string{}
 
-func TapEyeRemember(penseIndex, memory string) {
+func TapEyeRemember(penseIndex string, memory *string) {
 	penseEyeMap[penseIndex] = memory
 }
 
