@@ -16,4 +16,5 @@
 #
 bin/
 
+.idea/
 .vscode/
