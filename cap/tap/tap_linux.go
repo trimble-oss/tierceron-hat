@@ -29,15 +29,15 @@ func Tap(penseDir string, tapMap map[string]string, group string, skipPathContro
 
 	err := os.MkdirAll(penseDir, 0770)
 	if err != nil {
-		return errors.Join(errors.New("Dir create error"), err)
+		return errors.Join(errors.New("dir create error"), err)
 	}
 	azureDeployGroup, azureDeployGroupErr := user.LookupGroup(group)
 	if azureDeployGroupErr != nil {
-		return errors.Join(errors.New("Group lookup failure"), azureDeployGroupErr)
+		return errors.Join(errors.New("group lookup failure"), azureDeployGroupErr)
 	}
 	azureDeployGID, azureGIDConvErr := strconv.Atoi(azureDeployGroup.Gid)
 	if azureGIDConvErr != nil {
-		return errors.Join(errors.New("Group ID lookup failure"), azureGIDConvErr)
+		return errors.Join(errors.New("group ID lookup failure"), azureGIDConvErr)
 	}
 	os.Chown(penseDir, -1, azureDeployGID)
 	os.Chmod(penseDir, 0770)
@@ -61,7 +61,7 @@ func Tap(penseDir string, tapMap map[string]string, group string, skipPathContro
 	}(signalChan)
 
 	if err != nil {
-		return errors.Join(errors.New("Listen error"), listenErr)
+		return errors.Join(errors.New("listen error"), listenErr)
 	}
 
 	for {
@@ -70,7 +70,7 @@ func Tap(penseDir string, tapMap map[string]string, group string, skipPathContro
 			if conn != nil {
 				conn.Close()
 			}
-			return errors.Join(errors.New("Accept error"), acceptErr)
+			return errors.Join(errors.New("accept error"), acceptErr)
 		}
 
 		// 1st check.
@@ -109,8 +109,7 @@ func Tap(penseDir string, tapMap map[string]string, group string, skipPathContro
 					conn.Close()
 					continue
 				}
-				defer peerExe.Close()
-
+				// Close in the current scope rather than defer
 				h := sha256.New()
 				if _, err := io.Copy(h, peerExe); !skipPathControls && err != nil {
 					peerExe.Close()
@@ -133,8 +132,14 @@ func Tap(penseDir string, tapMap map[string]string, group string, skipPathContro
 						eyes, err := json.Marshal(penseEyeMap)
 						if err != nil {
 							conn.Write([]byte("mad eye"))
+							conn.Close()
+							continue
 						}
-						conn.Write([]byte(eyes))
+						_, writeErr := conn.Write([]byte(eyes))
+						if writeErr != nil {
+							conn.Close()
+							continue
+						}
 					}
 				}
 			}
@@ -149,8 +154,9 @@ func TapWriter(penseDir string, pense string) (map[string]string, error) {
 	if penseErr != nil {
 		return nil, penseErr
 	}
-	_, penseWriteErr := penseConn.Write([]byte(pense))
 	defer penseConn.Close()
+
+	_, penseWriteErr := penseConn.Write([]byte(pense))
 	if penseWriteErr != nil {
 		return nil, penseWriteErr
 	}

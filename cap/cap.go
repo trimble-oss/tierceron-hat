@@ -329,11 +329,8 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 // Pluck is a blocking call
 func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
 
-	pluckPacket := make([]byte, 2+len(pense)+1)
-	pluckPacket = append(pluckPacket, MODE_PLUCK)
-	pluckPacket = append(pluckPacket, PROTOCOL_DELIM)
+	pluckPacket := []byte{MODE_PLUCK, PROTOCOL_DELIM}
 	pluckPacket = append(pluckPacket, pense...)
-
 	hostAddr := *featherCtx.HostAddr + "1"
 	responseBuf := make([]byte, 100)
 
@@ -435,7 +432,11 @@ func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense 
 		return nil, penseErr
 	}
 	defer penseConn.Close()
-	packet := []byte(PROTOCOL_HDR)
+	// Preallocate enough space for all the pieces
+	protocolSize := len(PROTOCOL_HDR) + 1 + len(*featherCtx.HandshakeCode) + 1 + len(modeCtlPack) + 1 + len(pense)
+	packet := make([]byte, 0, protocolSize)
+
+	packet = append(packet, PROTOCOL_HDR...)
 	packet = append(packet, PROTOCOL_DELIM)
 	packet = append(packet, []byte(*featherCtx.HandshakeCode)...)
 	packet = append(packet, PROTOCOL_DELIM)
@@ -466,7 +467,9 @@ func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string
 }
 
 func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
-	penseSplits, err := shamir.Split([]byte(*featherCtx.HandshakeCode+string(PROTOCOL_DELIM)+pense), 12, 7)
+	// Create the message that will be split
+	message := *featherCtx.HandshakeCode + string(PROTOCOL_DELIM) + pense
+	penseSplits, err := shamir.Split([]byte(message), 12, 7)
 	if err != nil {
 		return nil, err
 	}
@@ -486,6 +489,7 @@ func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
 	}
 
 	responseBuf := make([]byte, 100)
+	penseConn.SetReadDeadline(time.Now().Add(12 * time.Second))
 	n, penseResponseErr := penseConn.Read(responseBuf)
 
 	return responseBuf[:n], penseResponseErr

@@ -20,9 +20,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 func FeatherCtlInit(icIn chan os.Signal,
 	localHostAddr *string,
 	encryptPass *string,
@@ -286,7 +283,16 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 					goto perching
 				}
 				if queryAction != nil {
-					queryAction(featherCtx, modeCtl)
+					retries := 0
+				retryQueryAction:
+					_, err := queryAction(featherCtx, modeCtl)
+					if errors.Is(err, context.DeadlineExceeded) {
+						if retries < 3 {
+							goto retryQueryAction
+						}
+						// Timeout occurred - go back to perching
+						goto perching
+					}
 				}
 				flapMode := []byte{cap.MODE_FLAP, '_'}
 				flapMode = append(flapMode, []byte(modeCtl)...)
