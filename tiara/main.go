@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/trimble-oss/tierceron-hat/cap"
 )
 
 // The next crowning
 func main() {
-	fmt.Println("Starting tiara")
+	fmt.Fprintln(os.Stderr, "Starting tiara")
 	go cap.Feather("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", func(int, string) bool { return true })
 
 	keyvar := new(string)

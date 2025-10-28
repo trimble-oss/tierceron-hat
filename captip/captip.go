@@ -12,7 +12,7 @@ import (
 )
 
 func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
-	fmt.Print(msg)
+	fmt.Fprint(os.Stderr, msg)
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
@@ -35,11 +35,11 @@ func main() {
 
 	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, captiplib.AcceptRemote, interrupted)
 
-	fmt.Printf("\nFirst run\n")
+	fmt.Fprintf(os.Stderr, "\nFirst run\n")
 	captiplib.FeatherCtl(featherCtx, emote)
-	fmt.Printf("\nResting....\n")
+	fmt.Fprintf(os.Stderr, "\nResting....\n")
 	time.Sleep(20 * time.Second)
-	fmt.Printf("\nTime for work....\n")
-	fmt.Printf("\n2nd run\n")
+	fmt.Fprintf(os.Stderr, "\nTime for work....\n")
+	fmt.Fprintf(os.Stderr, "\n2nd run\n")
 	captiplib.FeatherCtl(featherCtx, emote)
 }

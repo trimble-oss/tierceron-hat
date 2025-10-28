@@ -17,7 +17,7 @@ var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough"
 var penses []string = []string{"I think", "It is not enough to have a good mind.", "Ponder"}
 
 func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
-	fmt.Printf("%s.", msg)
+	fmt.Fprintf(os.Stderr, "%s.", msg)
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
@@ -38,7 +38,6 @@ func queryAction(featherCtx *cap.FeatherContext, ctl string) (string, error) {
 }
 
 func brimFeatherer(featherCtx *cap.FeatherContext) {
-
 	var modeCtlTrailChan chan string = make(chan string, 1)
 
 	go captiplib.FeatherCtlEmitter(featherCtx, modeCtlTrailChan, emote, queryAction)

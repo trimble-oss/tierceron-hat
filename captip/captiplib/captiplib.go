@@ -29,7 +29,8 @@ func FeatherCtlInit(icIn chan os.Signal,
 	sessionIdentifier *string,
 	env *string,
 	acceptRemoteFunc func(*cap.FeatherContext, int, string) (bool, error),
-	interruptedFunc func(*cap.FeatherContext) error) *cap.FeatherContext {
+	interruptedFunc func(*cap.FeatherContext) error,
+) *cap.FeatherContext {
 	return &cap.FeatherContext{
 		LocalHostAddr:                  localHostAddr,
 		EncryptPass:                    encryptPass,
@@ -104,7 +105,7 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 	var err error = errors.New("init")
 	bypass := err == nil || err.Error() != "init"
 	if emote == nil {
-		emote = func(featherCtx *cap.FeatherContext, flapMode string, msg string) { fmt.Printf("%s.", msg) }
+		emote = func(featherCtx *cap.FeatherContext, flapMode string, msg string) { fmt.Fprintf(os.Stderr, "%s.", msg) }
 	}
 
 	for {
@@ -257,10 +258,11 @@ const (
 
 func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan string,
 	emote func(*cap.FeatherContext, []byte, string),
-	queryAction func(*cap.FeatherContext, string) (string, error)) (string, error) {
+	queryAction func(*cap.FeatherContext, string) (string, error),
+) (string, error) {
 	if emote == nil {
 		emote = func(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
-			fmt.Print(msg)
+			fmt.Fprint(os.Stderr, msg)
 		}
 	}
 	sessionIdBinary := []byte(*featherCtx.SessionIdentifier)
@@ -389,7 +391,6 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 					cleancomplete:
 					}
 				}
-
 			}
 
 			err := interruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
