@@ -7,7 +7,7 @@ toolchain go1.24.5
 require (
 	github.com/lafriks/go-shamir v1.1.0
 	github.com/orcaman/concurrent-map/v2 v2.0.1
-	golang.org/x/sys v0.33.0
+	golang.org/x/sys v0.38.0
 	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.6
 )
@@ -24,7 +24,7 @@ require (
 
 require (
 	github.com/xtaci/kcp-go/v5 v5.6.3
-	golang.org/x/crypto v0.38.0
-	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/crypto v0.45.0
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 )
