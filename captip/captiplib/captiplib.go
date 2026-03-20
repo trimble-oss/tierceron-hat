@@ -29,11 +29,13 @@ func FeatherCtlInit(icIn chan os.Signal,
 	sessionIdentifier *string,
 	env *string,
 	acceptRemoteFunc func(*cap.FeatherContext, int, string) (bool, error),
-	interruptedFunc func(*cap.FeatherContext) error) *cap.FeatherContext {
+	interruptedFunc func(*cap.FeatherContext) error,
+) *cap.FeatherContext {
 	return &cap.FeatherContext{
 		LocalHostAddr:                  localHostAddr,
 		EncryptPass:                    encryptPass,
 		EncryptSalt:                    encryptSalt,
+		BlockCrypt:                     cap.NewBlockCrypt(encryptPass, encryptSalt),
 		HostAddr:                       hostAddr,
 		HandshakeCode:                  handshakeCode,
 		SessionIdentifier:              sessionIdentifier,
@@ -257,7 +259,8 @@ const (
 
 func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan string,
 	emote func(*cap.FeatherContext, []byte, string),
-	queryAction func(*cap.FeatherContext, string) (string, error)) (string, error) {
+	queryAction func(*cap.FeatherContext, string) (string, error),
+) (string, error) {
 	if emote == nil {
 		emote = func(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 			fmt.Print(msg)
@@ -389,7 +392,6 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 					cleancomplete:
 					}
 				}
-
 			}
 
 			err := interruptFun(featherCtx, featherCtx.MultiSecondInterruptTicker)
