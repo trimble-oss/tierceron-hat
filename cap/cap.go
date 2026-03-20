@@ -58,6 +58,7 @@ const (
 type FeatherContext struct {
 	EncryptPass                    *string
 	EncryptSalt                    *string
+	BlockCrypt                     kcp.BlockCrypt
 	LocalHostAddr                  *string
 	HostAddr                       *string
 	HandshakeCode                  *string
@@ -74,13 +75,28 @@ type FeatherContext struct {
 	Log                            *log.Logger
 }
 
+// NewBlockCrypt derives an AES block cipher from the given pass/salt using
+// PBKDF2-SHA1 (1024 iterations). Returns nil if either input is empty.
+func NewBlockCrypt(encryptPass, encryptSalt *string) kcp.BlockCrypt {
+	if encryptPass == nil || encryptSalt == nil || len(*encryptPass) == 0 || len(*encryptSalt) == 0 {
+		return nil
+	}
+	key := pbkdf2.Key([]byte(*encryptPass), []byte(*encryptSalt), 1024, 32, sha1.New)
+	block, _ := kcp.NewAESBlockCrypt(key)
+	return block
+}
+
 var penseMemoryMap map[string]*string = map[string]*string{}
 
-var penseFeatherCodeMap = cmap.New[string]()
-var penseFeatherMemoryMap map[string]*string = map[string]*string{}
+var (
+	penseFeatherCodeMap                      = cmap.New[string]()
+	penseFeatherMemoryMap map[string]*string = map[string]*string{}
+)
 
-var penseFeatherPluckMap = cmap.New[bool]()
-var penseFeatherCtlCodeMap = cmap.New[string]()
+var (
+	penseFeatherPluckMap   = cmap.New[bool]()
+	penseFeatherCtlCodeMap = cmap.New[string]()
+)
 
 // CodeSaltGuardFn is expected to return a hex.EncodeToString encoded salt
 type CodeSaltGuardFunc func() string
@@ -120,13 +136,11 @@ func hasMode(msg []byte, mode byte) bool {
 		} else {
 			return false
 		}
-
 	}
 	return false
 }
 
 func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
-
 	buf := make([]byte, 50)
 	for {
 		if acceptRemote(FEATHER_COMMON, conn.RemoteAddr().String()) {
@@ -328,7 +342,6 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 
 // Pluck is a blocking call
 func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
-
 	pluckPacket := []byte{MODE_PLUCK, PROTOCOL_DELIM}
 	pluckPacket = append(pluckPacket, pense...)
 	hostAddr := *featherCtx.HostAddr + "1"
@@ -424,8 +437,10 @@ func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense 
 		}
 	}
 
-	key := pbkdf2.Key([]byte(*featherCtx.EncryptPass), []byte(*featherCtx.EncryptSalt), 1024, 32, sha1.New)
-	block, _ := kcp.NewAESBlockCrypt(key)
+	block := featherCtx.BlockCrypt
+	if block == nil {
+		block = NewBlockCrypt(featherCtx.EncryptPass, featherCtx.EncryptSalt)
+	}
 
 	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
 	if penseErr != nil {
@@ -454,7 +469,6 @@ func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense 
 	n, penseResponseErr := penseConn.Read(responseBuf)
 
 	return responseBuf[:n], penseResponseErr
-
 }
 
 func FeatherCtlEmit(featherCtx *FeatherContext, modeCtlPack string, pense string, bypass bool) (string, error) {
@@ -473,8 +487,10 @@ func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := pbkdf2.Key([]byte(*featherCtx.EncryptPass), []byte(*featherCtx.EncryptSalt), 1024, 32, sha1.New)
-	block, _ := kcp.NewAESBlockCrypt(key)
+	block := featherCtx.BlockCrypt
+	if block == nil {
+		block = NewBlockCrypt(featherCtx.EncryptPass, featherCtx.EncryptSalt)
+	}
 
 	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
 	if penseErr != nil {
@@ -509,7 +525,6 @@ type penseServer struct {
 }
 
 func (cs *penseServer) Pense(ctx context.Context, penseRequest *PenseRequest) (*PenseReply, error) {
-
 	penseArray := sha256.Sum256([]byte(penseRequest.Pense))
 	penseCode := hex.EncodeToString(penseArray[:])
 
