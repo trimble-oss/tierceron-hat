@@ -19,7 +19,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/xtaci/kcp-go/v5 v5.6.70 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
