@@ -3,7 +3,6 @@ package cap
 import (
 	"bytes"
 	context "context"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -75,15 +74,27 @@ type FeatherContext struct {
 	Log                            *log.Logger
 }
 
+func deriveKCPKey(encryptPass, encryptSalt string) []byte {
+	return pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, kcpKDFHash())
+}
+
+func newKCPBlockCrypt(encryptPass, encryptSalt string) kcp.BlockCrypt {
+	key := deriveKCPKey(encryptPass, encryptSalt)
+	block, err := kcp.NewAESBlockCrypt(key)
+	if err != nil {
+		return nil
+	}
+	return block
+}
+
 // NewBlockCrypt derives an AES block cipher from the given pass/salt using
-// PBKDF2-SHA1 (1024 iterations). Returns nil if either input is empty.
+// PBKDF2. Default builds preserve the legacy hash, while `-tags=fips` builds
+// force the FIPS-compatible KDF hash. Returns nil if either input is empty.
 func NewBlockCrypt(encryptPass, encryptSalt *string) kcp.BlockCrypt {
 	if encryptPass == nil || encryptSalt == nil || len(*encryptPass) == 0 || len(*encryptSalt) == 0 {
 		return nil
 	}
-	key := pbkdf2.Key([]byte(*encryptPass), []byte(*encryptSalt), 1024, 32, sha1.New)
-	block, _ := kcp.NewAESBlockCrypt(key)
-	return block
+	return newKCPBlockCrypt(*encryptPass, *encryptSalt)
 }
 
 var penseMemoryMap map[string]*string = map[string]*string{}
@@ -386,8 +397,7 @@ func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeC
 			}
 		}
 	}()
-	key := pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, sha1.New)
-	block, _ := kcp.NewAESBlockCrypt(key)
+	block := newKCPBlockCrypt(encryptPass, encryptSalt)
 	if listener, err := kcp.ListenWithOptions(hostAddr, block, 10, 3); err == nil {
 		for {
 			select {
