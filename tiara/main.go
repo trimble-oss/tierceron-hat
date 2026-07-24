@@ -9,7 +9,8 @@ import (
 // The next crowning
 func main() {
 	fmt.Println("Starting tiara")
-	go cap.Feather("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", func(int, string) bool { return true })
+	tlsConfig := cap.NewFeatherSelfSignedTLSConfig()
+	go cap.FeatherWithTLS("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", tlsConfig, func(int, string) bool { return true })
 
 	keyvar := new(string)
 	*keyvar = "therefore I am."

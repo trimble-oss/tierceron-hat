@@ -3,21 +3,28 @@ package cap
 import (
 	"bytes"
 	context "context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"errors"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trimble-oss/tierceron-hat/cap/tap"
 
 	"github.com/lafriks/go-shamir"
 	cmap "github.com/orcaman/concurrent-map/v2"
-	"github.com/xtaci/kcp-go/v5"
+	quic "github.com/quic-go/quic-go"
 	"golang.org/x/crypto/pbkdf2"
 	grpc "google.golang.org/grpc"
 )
@@ -49,6 +56,11 @@ var (
 )
 
 const (
+	featherQUICALPN       = "feather-quic"
+	featherQUICServerName = "feather.local"
+)
+
+const (
 	RUN_STARTED = 1 << iota // RUN_STARTED
 	RUNNING     = 1 << iota // RUNNING 2
 	RESETTING   = 1 << iota // RESETTING 4
@@ -57,12 +69,16 @@ const (
 type FeatherContext struct {
 	EncryptPass                    *string
 	EncryptSalt                    *string
-	BlockCrypt                     kcp.BlockCrypt
 	LocalHostAddr                  *string
 	HostAddr                       *string
 	HandshakeCode                  *string
 	SessionIdentifier              *string
 	Env                            *string
+	TLSConfig                      *FeatherTLSConfig
+	controlConnMu                  sync.Mutex
+	controlConn                    *quic.Conn
+	dataConnMu                     sync.Mutex
+	dataConn                       *quic.Conn
 	AcceptRemoteFunc               func(*FeatherContext, int, string) (bool, error)
 	InterruptHandlerFunc           func(*FeatherContext) error
 	InterruptChan                  chan os.Signal
@@ -74,27 +90,23 @@ type FeatherContext struct {
 	Log                            *log.Logger
 }
 
-func deriveKCPKey(encryptPass, encryptSalt string) []byte {
-	return pbkdf2.Key([]byte(encryptPass), []byte(encryptSalt), 1024, 32, kcpKDFHash())
+type FeatherTLSConfig struct {
+	AllowSelfSigned bool
+	ListenerCertPEM *[]byte
+	ListenerKeyPEM  *[]byte
+	RootCertPEM     *[]byte
 }
 
-func newKCPBlockCrypt(encryptPass, encryptSalt string) kcp.BlockCrypt {
-	key := deriveKCPKey(encryptPass, encryptSalt)
-	block, err := kcp.NewAESBlockCrypt(key)
-	if err != nil {
-		return nil
-	}
-	return block
+func NewFeatherSelfSignedTLSConfig() *FeatherTLSConfig {
+	return &FeatherTLSConfig{AllowSelfSigned: true}
 }
 
-// NewBlockCrypt derives an AES block cipher from the given pass/salt using
-// PBKDF2. Default builds preserve the legacy hash, while `-tags=fips` builds
-// force the FIPS-compatible KDF hash. Returns nil if either input is empty.
-func NewBlockCrypt(encryptPass, encryptSalt *string) kcp.BlockCrypt {
-	if encryptPass == nil || encryptSalt == nil || len(*encryptPass) == 0 || len(*encryptSalt) == 0 {
-		return nil
+func NewFeatherPEMTLSConfig(listenerCertPEM, listenerKeyPEM, rootCertPEM *[]byte) *FeatherTLSConfig {
+	return &FeatherTLSConfig{
+		ListenerCertPEM: listenerCertPEM,
+		ListenerKeyPEM:  listenerKeyPEM,
+		RootCertPEM:     rootCertPEM,
 	}
-	return newKCPBlockCrypt(*encryptPass, *encryptSalt)
 }
 
 var penseMemoryMap map[string]*string = map[string]*string{}
@@ -108,6 +120,22 @@ var (
 	penseFeatherPluckMap   = cmap.New[bool]()
 	penseFeatherCtlCodeMap = cmap.New[string]()
 )
+
+type featherTLSCacheKey struct {
+	encryptPass      string
+	encryptSalt      string
+	allowSelfSigned  bool
+	listenerCertHash string
+	listenerKeyHash  string
+	rootCertHash     string
+}
+
+type featherTLSCacheValue struct {
+	server *tls.Config
+	client *tls.Config
+}
+
+var featherTLSCache sync.Map
 
 // featherDoneChan signals shutdown to Feather listeners
 var (
@@ -132,6 +160,344 @@ func TapInitCodeSaltGuard(csgFn CodeSaltGuardFunc) {
 	CodeSaltGuardFn = csgFn
 }
 
+type deterministicReader struct {
+	seed    []byte
+	counter uint64
+	buf     []byte
+	pos     int
+}
+
+func (dr *deterministicReader) Read(p []byte) (int, error) {
+	total := 0
+	for total < len(p) {
+		if dr.pos == len(dr.buf) {
+			counterBytes := []byte{
+				byte(dr.counter >> 56),
+				byte(dr.counter >> 48),
+				byte(dr.counter >> 40),
+				byte(dr.counter >> 32),
+				byte(dr.counter >> 24),
+				byte(dr.counter >> 16),
+				byte(dr.counter >> 8),
+				byte(dr.counter),
+			}
+			hashInput := append(append([]byte{}, dr.seed...), counterBytes...)
+			hash := sha256.Sum256(hashInput)
+			dr.buf = hash[:]
+			dr.pos = 0
+			dr.counter++
+		}
+		n := copy(p[total:], dr.buf[dr.pos:])
+		total += n
+		dr.pos += n
+	}
+	return total, nil
+}
+
+type featherQUICStream struct {
+	conn   *quic.Conn
+	stream *quic.Stream
+}
+
+func (fqs *featherQUICStream) Read(p []byte) (int, error) {
+	return fqs.stream.Read(p)
+}
+
+func (fqs *featherQUICStream) Write(p []byte) (int, error) {
+	return fqs.stream.Write(p)
+}
+
+func (fqs *featherQUICStream) Close() error {
+	return fqs.stream.Close()
+}
+
+func (fqs *featherQUICStream) LocalAddr() net.Addr {
+	return fqs.conn.LocalAddr()
+}
+
+func (fqs *featherQUICStream) RemoteAddr() net.Addr {
+	return fqs.conn.RemoteAddr()
+}
+
+func (fqs *featherQUICStream) SetDeadline(t time.Time) error {
+	return fqs.stream.SetDeadline(t)
+}
+
+func (fqs *featherQUICStream) SetReadDeadline(t time.Time) error {
+	return fqs.stream.SetReadDeadline(t)
+}
+
+func (fqs *featherQUICStream) SetWriteDeadline(t time.Time) error {
+	return fqs.stream.SetWriteDeadline(t)
+}
+
+func newDeterministicReader(encryptPass, encryptSalt string) *deterministicReader {
+	seed := pbkdf2.Key([]byte(encryptPass), []byte("feather-quic:"+encryptSalt), 4096, 32, sha256.New)
+	return &deterministicReader{seed: seed}
+}
+
+func buildQUICCertificate(encryptPass, encryptSalt string) (tls.Certificate, *x509.Certificate, error) {
+	seed := pbkdf2.Key([]byte(encryptPass), []byte("feather-quic-cert:"+encryptSalt), 4096, ed25519.SeedSize, sha256.New)
+	privateKey := ed25519.NewKeyFromSeed(seed)
+
+	serialHash := sha256.Sum256([]byte(encryptPass + ":" + encryptSalt + ":feather-cert"))
+	serialNumber := new(big.Int).SetBytes(serialHash[:])
+	if serialNumber.Sign() == 0 {
+		serialNumber = big.NewInt(1)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName: featherQUICServerName,
+		},
+		DNSNames:              []string{featherQUICServerName},
+		NotBefore:             time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:              time.Date(2044, time.January, 1, 0, 0, 0, 0, time.UTC),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, privateKey.Public(), privateKey)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+
+	tlsCertificate := tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  privateKey,
+		Leaf:        leaf,
+	}
+
+	return tlsCertificate, leaf, nil
+}
+
+func hashTLSBytes(value *[]byte) string {
+	if value == nil || len(*value) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(*value)
+	return hex.EncodeToString(sum[:])
+}
+
+func newFeatherTLSCacheKey(encryptPass, encryptSalt string, tlsConfig *FeatherTLSConfig) featherTLSCacheKey {
+	cacheKey := featherTLSCacheKey{encryptPass: encryptPass, encryptSalt: encryptSalt}
+	if tlsConfig != nil {
+		cacheKey.allowSelfSigned = tlsConfig.AllowSelfSigned
+		cacheKey.listenerCertHash = hashTLSBytes(tlsConfig.ListenerCertPEM)
+		cacheKey.listenerKeyHash = hashTLSBytes(tlsConfig.ListenerKeyPEM)
+		cacheKey.rootCertHash = hashTLSBytes(tlsConfig.RootCertPEM)
+	}
+	return cacheKey
+}
+
+func loadQUICCertificate(certPEM, keyPEM []byte) (tls.Certificate, *x509.Certificate, error) {
+	tlsCertificate, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	if len(tlsCertificate.Certificate) == 0 {
+		return tls.Certificate{}, nil, errors.New("listener certificate PEM is empty")
+	}
+	leaf, err := x509.ParseCertificate(tlsCertificate.Certificate[0])
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	tlsCertificate.Leaf = leaf
+	return tlsCertificate, leaf, nil
+}
+
+func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSConfig) (*tls.Config, *tls.Config, error) {
+	cacheKey := newFeatherTLSCacheKey(encryptPass, encryptSalt, tlsConfig)
+	if cached, ok := featherTLSCache.Load(cacheKey); ok {
+		cachedValue := cached.(featherTLSCacheValue)
+		return cachedValue.server.Clone(), cachedValue.client.Clone(), nil
+	}
+
+	allowSelfSigned := tlsConfig == nil || tlsConfig.AllowSelfSigned
+	var tlsCertificate tls.Certificate
+	var leaf *x509.Certificate
+	var err error
+	if tlsConfig != nil && ((tlsConfig.ListenerCertPEM != nil && len(*tlsConfig.ListenerCertPEM) > 0) || (tlsConfig.ListenerKeyPEM != nil && len(*tlsConfig.ListenerKeyPEM) > 0)) {
+		if tlsConfig.ListenerCertPEM == nil || len(*tlsConfig.ListenerCertPEM) == 0 || tlsConfig.ListenerKeyPEM == nil || len(*tlsConfig.ListenerKeyPEM) == 0 {
+			return nil, nil, errors.New("listener certificate and key PEM must both be provided")
+		}
+		tlsCertificate, leaf, err = loadQUICCertificate(*tlsConfig.ListenerCertPEM, *tlsConfig.ListenerKeyPEM)
+	} else {
+		tlsCertificate, leaf, err = buildQUICCertificate(encryptPass, encryptSalt)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	rootCAs := x509.NewCertPool()
+	switch {
+	case tlsConfig != nil && tlsConfig.RootCertPEM != nil && len(*tlsConfig.RootCertPEM) > 0:
+		if !rootCAs.AppendCertsFromPEM(*tlsConfig.RootCertPEM) {
+			return nil, nil, errors.New("failed to parse root certificate PEM")
+		}
+	case allowSelfSigned && tlsConfig != nil && tlsConfig.ListenerCertPEM != nil && len(*tlsConfig.ListenerCertPEM) > 0:
+		if !rootCAs.AppendCertsFromPEM(*tlsConfig.ListenerCertPEM) {
+			return nil, nil, errors.New("failed to parse listener certificate PEM")
+		}
+	case allowSelfSigned:
+		rootCAs.AddCert(leaf)
+	default:
+		return nil, nil, errors.New("root certificate PEM required when AllowSelfSigned is false")
+	}
+
+	serverTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		MinVersion:   tls.VersionTLS13,
+		NextProtos:   []string{featherQUICALPN},
+	}
+	clientTLSConfig := &tls.Config{
+		RootCAs:    rootCAs,
+		ServerName: featherQUICServerName,
+		MinVersion: tls.VersionTLS13,
+		NextProtos: []string{featherQUICALPN},
+	}
+
+	featherTLSCache.Store(cacheKey, featherTLSCacheValue{server: serverTLSConfig, client: clientTLSConfig})
+	return serverTLSConfig.Clone(), clientTLSConfig.Clone(), nil
+}
+
+func newFeatherQUICConfig() *quic.Config {
+	return &quic.Config{
+		HandshakeIdleTimeout: 5 * time.Second,
+		MaxIdleTimeout:       30 * time.Second,
+		KeepAlivePeriod:      10 * time.Second,
+		MaxIncomingStreams:   128,
+	}
+}
+
+func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) {
+	quicConn, err := quic.DialAddr(context.Background(), addr, clientTLSConfig, newFeatherQUICConfig())
+	if err != nil {
+		return nil, err
+	}
+	return quicConn, nil
+}
+
+func openQUICStream(quicConn *quic.Conn) (net.Conn, error) {
+	stream, err := quicConn.OpenStreamSync(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return &featherQUICStream{conn: quicConn, stream: stream}, nil
+}
+
+func dialQUIC(addr string, clientTLSConfig *tls.Config) (net.Conn, error) {
+	quicConn, err := dialQUICConn(addr, clientTLSConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	streamConn, err := openQUICStream(quicConn)
+	if err != nil {
+		quicConn.CloseWithError(0, "")
+		return nil, err
+	}
+
+	return streamConn, nil
+}
+
+func (featherCtx *FeatherContext) getOrCreateQUICConn(control bool, clientTLSConfig *tls.Config) (*quic.Conn, error) {
+	addr := *featherCtx.HostAddr
+	var connMu *sync.Mutex
+	var currentConn **quic.Conn
+
+	if control {
+		connMu = &featherCtx.controlConnMu
+		currentConn = &featherCtx.controlConn
+	} else {
+		connMu = &featherCtx.dataConnMu
+		currentConn = &featherCtx.dataConn
+	}
+
+	connMu.Lock()
+	defer connMu.Unlock()
+
+	if *currentConn != nil {
+		if (*currentConn).Context().Err() == nil {
+			return *currentConn, nil
+		}
+		*currentConn = nil
+	}
+
+	quicConn, err := dialQUICConn(addr, clientTLSConfig.Clone())
+	if err != nil {
+		return nil, err
+	}
+	*currentConn = quicConn
+	return quicConn, nil
+}
+
+func (featherCtx *FeatherContext) openQUICClientStream(control bool, clientTLSConfig *tls.Config) (net.Conn, error) {
+	quicConn, err := featherCtx.getOrCreateQUICConn(control, clientTLSConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	streamConn, err := openQUICStream(quicConn)
+	if err == nil {
+		return streamConn, nil
+	}
+
+	var connMu *sync.Mutex
+	var currentConn **quic.Conn
+	if control {
+		connMu = &featherCtx.controlConnMu
+		currentConn = &featherCtx.controlConn
+	} else {
+		connMu = &featherCtx.dataConnMu
+		currentConn = &featherCtx.dataConn
+	}
+
+	connMu.Lock()
+	if *currentConn == quicConn {
+		(*currentConn).CloseWithError(0, "")
+		*currentConn = nil
+	}
+	connMu.Unlock()
+
+	quicConn, err = featherCtx.getOrCreateQUICConn(control, clientTLSConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return openQUICStream(quicConn)
+}
+
+func acceptQUICStream(conn *quic.Conn) (net.Conn, error) {
+	stream, err := conn.AcceptStream(context.Background())
+	if err != nil {
+		conn.CloseWithError(0, "")
+		return nil, err
+	}
+	return &featherQUICStream{conn: conn, stream: stream}, nil
+}
+
+func isTimeoutErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, io.EOF) {
+		return true
+	}
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return true
+	}
+	return strings.Contains(err.Error(), "timeout")
+}
+
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
 	if err != nil {
@@ -150,7 +516,29 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	}
 }
 
-var clientCodeMap = cmap.New[[][]byte]()
+var clientCodeMap = cmap.New[[]byte]()
+
+func encodeFeatherPayload(payload []byte) []byte {
+	framed := make([]byte, 2+len(payload))
+	framed[0] = byte(len(payload) >> 8)
+	framed[1] = byte(len(payload))
+	copy(framed[2:], payload)
+	return framed
+}
+
+func decodeFeatherPayloads(payload []byte) [][]byte {
+	decoded := [][]byte{}
+	for offset := 0; offset+2 <= len(payload); {
+		blockLen := int(payload[offset])<<8 | int(payload[offset+1])
+		offset += 2
+		if offset+blockLen > len(payload) {
+			break
+		}
+		decoded = append(decoded, append([]byte{}, payload[offset:offset+blockLen]...))
+		offset += blockLen
+	}
+	return decoded
+}
 
 func hasMode(msg []byte, mode byte) bool {
 	for _, b := range msg {
@@ -165,7 +553,7 @@ func hasMode(msg []byte, mode byte) bool {
 	return false
 }
 
-func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
+func handlePluck(conn net.Conn, acceptRemote func(int, string) bool) {
 	buf := make([]byte, 50)
 	for {
 		select {
@@ -175,7 +563,6 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 		default:
 		}
 		if acceptRemote(FEATHER_COMMON, conn.RemoteAddr().String()) {
-			lastReadN := 0
 			lastActivityTime := time.Now()
 			for {
 				select {
@@ -194,10 +581,6 @@ func handlePluck(conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
 				time.Sleep(time.Second * 3)
 				conn.SetDeadline(time.Now().Add(15 * time.Second))
 				n, err := conn.Read(buf)
-				if lastReadN != n {
-					lastReadN = n
-					conn.SetReadBuffer(lastReadN)
-				}
 				if err != nil {
 					conn.Close()
 					return
@@ -247,7 +630,7 @@ func bytesSplit(data []byte, separator byte) [][]byte {
 	return parts
 }
 
-func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func(int, string) bool) {
+func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, string) bool) {
 	buf := make([]byte, 4096)
 	lastActivityTime := time.Now()
 	for {
@@ -267,7 +650,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
 		if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
-			clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
+			clientCodeMap.Set(conn.RemoteAddr().String(), []byte{})
 		}
 
 		if n == 0 || err != nil {
@@ -275,11 +658,14 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
 				var messageBytes []byte
 				var err error = nil
-				if cremote, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok && len(cremote) > 1 {
-					messageBytes, err = shamir.Combine(cremote...)
+				if cremote, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok && len(cremote) > 0 {
+					decodedPayloads := decodeFeatherPayloads(cremote)
+					if len(decodedPayloads) > 1 {
+						messageBytes, err = shamir.Combine(decodedPayloads...)
+					}
 				}
 				if err == nil {
-					clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
+					clientCodeMap.Set(conn.RemoteAddr().String(), []byte{})
 					if acceptRemote(FEATHER_SECRET, conn.RemoteAddr().String()) {
 						message := string(messageBytes)
 						messageParts := strings.Split(message, string(PROTOCOL_DELIM))
@@ -311,7 +697,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 			// Update activity on successful read
 			lastActivityTime = time.Now()
 			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
-				clientCodeMap.Set(conn.RemoteAddr().String(), [][]byte{})
+				clientCodeMap.Set(conn.RemoteAddr().String(), []byte{})
 			}
 
 			if bytes.HasPrefix(buf[:n], PROTOCOL_HDR_BYTES) {
@@ -339,7 +725,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 								penseFeatherCtlCodeMap.Set(activity, ctl)
 								msg = string(MODE_PERCH)
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_FLAP: // Flap
-								if msg[0] == MODE_GAZE { // If had gaze, then flap...
+								if msg[0] == MODE_GAZE || msg[0] == MODE_FLAP { // Preserve payload-bearing flaps once the session is active.
 									penseFeatherCtlCodeMap.Set(activity, ctl)
 								}
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GAZE: // Gaze
@@ -362,7 +748,7 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 				return
 			} else {
 				if ccmap, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
-					clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, append([]byte{}, buf[:n]...)))
+					clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, buf[:n]...))
 				}
 				defer conn.Close()
 			}
@@ -371,52 +757,69 @@ func handleMessage(handshakeCode string, conn *kcp.UDPSession, acceptRemote func
 }
 
 func Feather(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, acceptRemote func(int, string) bool) {
+	FeatherWithTLS(encryptPass, encryptSalt, hostAddr, handshakeCode, nil, acceptRemote)
+	return
+}
+
+func FeatherWithTLS(encryptPass string, encryptSalt string, hostAddr string, handshakeCode string, tlsConfig *FeatherTLSConfig, acceptRemote func(int, string) bool) {
+	serverTLSConfig, _, err := getQUICTLSConfigs(encryptPass, encryptSalt, tlsConfig)
+	if err != nil {
+		return
+	}
+
 	go func() {
-		if pluckListener, err := kcp.ListenWithOptions(hostAddr+"1", nil, 0, 0); err == nil {
+		if pluckListener, err := quic.ListenAddr(hostAddr+"1", serverTLSConfig.Clone(), newFeatherQUICConfig()); err == nil {
+			go func() {
+				<-featherDoneChan
+				pluckListener.Close()
+			}()
 			for {
-				select {
-				case <-featherDoneChan:
-					pluckListener.Close()
-					return
-				default:
-				}
-				pluckS, err := pluckListener.AcceptKCP()
+				pluckConn, err := pluckListener.Accept(context.Background())
 				if err != nil {
-					if errors.Is(err, os.ErrDeadlineExceeded) || err.Error() == "timeout" || err == io.EOF {
-						if pluckS != nil {
-							pluckS.Close()
-						}
+					if errors.Is(err, quic.ErrServerClosed) {
+						return
 					}
 					time.Sleep(time.Second)
 					continue
 				}
-
-				// Balanced for distributed systems: nodelay=1 (fast), interval=60ms (not too aggressive), resend=2, congestion=0 (enabled)
-				pluckS.SetNoDelay(1, 60, 2, 0)
-				go handlePluck(pluckS, acceptRemote)
+				go func(conn *quic.Conn) {
+					for {
+						streamConn, err := acceptQUICStream(conn)
+						if err != nil {
+							return
+						}
+						go handlePluck(streamConn, acceptRemote)
+					}
+				}(pluckConn)
 			}
 		}
 	}()
-	block := newKCPBlockCrypt(encryptPass, encryptSalt)
-	if listener, err := kcp.ListenWithOptions(hostAddr, block, 10, 3); err == nil {
+	if listener, err := quic.ListenAddr(hostAddr, serverTLSConfig.Clone(), newFeatherQUICConfig()); err == nil {
+		go func() {
+			<-featherDoneChan
+			listener.Close()
+		}()
 		for {
-			select {
-			case <-featherDoneChan:
-				listener.Close()
-				return
-			default:
-			}
-			s, err := listener.AcceptKCP()
+			conn, err := listener.Accept(context.Background())
 			if err != nil {
+				if errors.Is(err, quic.ErrServerClosed) {
+					return
+				}
 				continue
 			}
-			// Balanced for distributed systems: nodelay=1 (fast), interval=60ms (not too aggressive), resend=2, congestion=0 (enabled)
-			s.SetNoDelay(1, 60, 2, 0)
-			if acceptRemote(FEATHER_COMMON, s.RemoteAddr().String()) {
-				go handleMessage(handshakeCode, s, acceptRemote)
-			} else {
-				s.Close()
-			}
+			go func(quicConn *quic.Conn) {
+				for {
+					streamConn, err := acceptQUICStream(quicConn)
+					if err != nil {
+						return
+					}
+					if acceptRemote(FEATHER_COMMON, streamConn.RemoteAddr().String()) {
+						go handleMessage(handshakeCode, streamConn, acceptRemote)
+					} else {
+						streamConn.Close()
+					}
+				}
+			}(conn)
 		}
 	}
 }
@@ -427,25 +830,26 @@ func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
 	pluckPacket = append(pluckPacket, pense...)
 	hostAddr := *featherCtx.HostAddr + "1"
 	responseBuf := make([]byte, 100)
+	_, clientTLSConfig, tlsErr := getQUICTLSConfigs(valueOrEmpty(featherCtx.EncryptPass), valueOrEmpty(featherCtx.EncryptSalt), featherCtx.TLSConfig)
+	if tlsErr != nil {
+		return true, tlsErr
+	}
 
 	var penseConn net.Conn
 	var penseErr error
 	retries := 0
 
 retryEstablish:
-	penseConnRaw, penseErr := kcp.Dial(hostAddr)
-	penseConn = penseConnRaw
+	penseConn, penseErr = dialQUIC(hostAddr, clientTLSConfig.Clone())
 	if penseErr == nil {
-		if s, ok := penseConnRaw.(*kcp.UDPSession); ok {
-			// Balanced for distributed systems: nodelay=1 (fast), interval=60ms (not too aggressive), resend=2, congestion=0 (enabled)
-			s.SetNoDelay(1, 60, 2, 0)
-		}
 	}
 	if penseErr != nil {
 		time.Sleep(time.Second)
 		if retries < 10 && penseErr != io.EOF {
 			retries = retries + 1
-			penseConn.Close()
+			if penseConn != nil {
+				penseConn.Close()
+			}
 			goto retryEstablish
 		} else {
 			// break immediately
@@ -460,7 +864,7 @@ retryEstablish:
 		penseConn.SetDeadline(time.Now().Add(5 * time.Second))
 		_, penseWriteErr := penseConn.Write(pluckPacket)
 		if penseWriteErr != nil {
-			if errors.Is(penseWriteErr, os.ErrDeadlineExceeded) || penseWriteErr.Error() == "timeout" || penseWriteErr == io.EOF || strings.Contains(penseWriteErr.Error(), "timeout") {
+			if isTimeoutErr(penseWriteErr) {
 				if retries < 10 {
 					time.Sleep(time.Second)
 					retries = retries + 1
@@ -477,7 +881,7 @@ retryEstablish:
 		penseConn.SetDeadline(time.Now().Add(5 * time.Second))
 		n, penseResponseErr := penseConn.Read(responseBuf)
 		if penseResponseErr != nil {
-			if errors.Is(penseResponseErr, os.ErrDeadlineExceeded) || penseResponseErr.Error() == "timeout" || penseResponseErr == io.EOF {
+			if isTimeoutErr(penseResponseErr) {
 				if retries < 10 {
 					time.Sleep(time.Second)
 					retries = retries + 1
@@ -524,18 +928,15 @@ func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense 
 			return nil, accErr
 		}
 	}
-
-	block := featherCtx.BlockCrypt
-	if block == nil {
-		block = NewBlockCrypt(featherCtx.EncryptPass, featherCtx.EncryptSalt)
+	_, clientTLSConfig, tlsErr := getQUICTLSConfigs(valueOrEmpty(featherCtx.EncryptPass), valueOrEmpty(featherCtx.EncryptSalt), featherCtx.TLSConfig)
+	if tlsErr != nil {
+		return nil, tlsErr
 	}
 
-	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
+	penseConn, penseErr := featherCtx.openQUICClientStream(true, clientTLSConfig)
 	if penseErr != nil {
 		return nil, penseErr
 	}
-	// Balanced for distributed systems: nodelay=1 (fast), interval=60ms (not too aggressive), resend=2, congestion=0 (enabled)
-	penseConn.SetNoDelay(1, 60, 2, 0)
 	defer penseConn.Close()
 	// Preallocate enough space for all the pieces
 	protocolSize := len(PROTOCOL_HDR) + 1 + len(*featherCtx.HandshakeCode) + 1 + len(modeCtlPack) + 1 + len(pense)
@@ -557,6 +958,9 @@ func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense 
 
 	penseConn.SetReadDeadline(time.Now().Add(5000 * time.Millisecond))
 	n, penseResponseErr := penseConn.Read(responseBuf)
+	if n > 0 && errors.Is(penseResponseErr, io.EOF) {
+		penseResponseErr = nil
+	}
 
 	return responseBuf[:n], penseResponseErr
 }
@@ -577,20 +981,18 @@ func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	block := featherCtx.BlockCrypt
-	if block == nil {
-		block = NewBlockCrypt(featherCtx.EncryptPass, featherCtx.EncryptSalt)
+	_, clientTLSConfig, tlsErr := getQUICTLSConfigs(valueOrEmpty(featherCtx.EncryptPass), valueOrEmpty(featherCtx.EncryptSalt), featherCtx.TLSConfig)
+	if tlsErr != nil {
+		return nil, tlsErr
 	}
 
-	penseConn, penseErr := kcp.DialWithOptions(*featherCtx.HostAddr, block, 10, 3)
+	penseConn, penseErr := featherCtx.openQUICClientStream(false, clientTLSConfig)
 	if penseErr != nil {
 		return nil, penseErr
 	}
-	// Balanced for distributed systems: nodelay=1 (fast), interval=60ms (not too aggressive), resend=2, congestion=0 (enabled)
-	penseConn.SetNoDelay(1, 60, 2, 0)
 	defer penseConn.Close()
 	for _, penseBlock := range penseSplits {
-		_, penseWriteErr := penseConn.Write(penseBlock)
+		_, penseWriteErr := penseConn.Write(encodeFeatherPayload(penseBlock))
 		if penseWriteErr != nil {
 			return nil, penseWriteErr
 		}
@@ -599,6 +1001,9 @@ func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
 	responseBuf := make([]byte, 100)
 	penseConn.SetReadDeadline(time.Now().Add(12 * time.Second))
 	n, penseResponseErr := penseConn.Read(responseBuf)
+	if n > 0 && errors.Is(penseResponseErr, io.EOF) {
+		penseResponseErr = nil
+	}
 
 	return responseBuf[:n], penseResponseErr
 }
@@ -606,6 +1011,13 @@ func FeatherWriter(featherCtx *FeatherContext, pense string) ([]byte, error) {
 func TapFeather(penseIndex string, memory *string) {
 	penseMemoryMap[penseIndex] = memory
 	penseFeatherMemoryMap[penseIndex] = memory
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func TapMemorize(penseIndex string, memory *string) {

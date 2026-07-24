@@ -120,6 +120,7 @@ func main() {
 	handshakeCode := "ThisIsACode"
 	sessionIdentifier := "FeatherSessionOne"
 	env := "SomeEnv"
+	tlsConfig := cap.NewFeatherSelfSignedTLSConfig()
 
 	// Initialize mpb container for graceful multi-line output
 	mpbContainer = mpb.New()
@@ -170,13 +171,13 @@ func main() {
 			return mpb.BarFillerFunc(barTwoFillerFunc)
 		}))
 
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, captiplib.AcceptRemoteNoTimeout, interrupted)
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemoteNoTimeout, interrupted)
 
 	go brimFeatherer(featherCtx)
 
 	sessionIdentifierTwo := "FeatherSessionTwo"
 
-	featherCtxTwo := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifierTwo, &env, captiplib.AcceptRemoteNoTimeout, interrupted)
+	featherCtxTwo := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifierTwo, &env, tlsConfig, captiplib.AcceptRemoteNoTimeout, interrupted)
 
 	go brimFeatherer(featherCtxTwo)
 
