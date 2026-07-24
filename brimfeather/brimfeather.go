@@ -49,8 +49,8 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 		return
 	}
 
+	var bar *mpb.Bar
 	outputMutex.Lock()
-	defer outputMutex.Unlock()
 
 	// Append message to the accumulating buffer
 	if *featherCtx.SessionIdentifier == "FeatherSessionOne" {
@@ -59,14 +59,19 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 		if len(messageOneBuffer) > 500 {
 			messageOneBuffer = messageOneBuffer[len(messageOneBuffer)-500:]
 		}
-		barOne.Increment()
+		bar = barOne
 	} else {
 		messageTwoBuffer += msg + " "
 		// Keep buffer size reasonable (truncate to last 500 chars if too long)
 		if len(messageTwoBuffer) > 500 {
 			messageTwoBuffer = messageTwoBuffer[len(messageTwoBuffer)-500:]
 		}
-		barTwo.Increment()
+		bar = barTwo
+	}
+	outputMutex.Unlock()
+
+	if bar != nil {
+		bar.Increment()
 	}
 }
 
@@ -152,7 +157,7 @@ func main() {
 		// Write message up to the bar width, then pad with spaces
 		barWidth := int(st.Total) - 5 // Account for brackets and prefix
 		if len(msg) >= barWidth {
-			_, err := fmt.Fprint(w, msg[:barWidth])
+			_, err := fmt.Fprint(w, msg[len(msg)-barWidth:])
 			return err
 		}
 		// Pad with spaces to fill the bar
@@ -168,7 +173,7 @@ func main() {
 		// Write message up to the bar width, then pad with spaces
 		barWidth := int(st.Total) - 5 // Account for brackets and prefix
 		if len(msg) >= barWidth {
-			_, err := fmt.Fprint(w, msg[:barWidth])
+			_, err := fmt.Fprint(w, msg[len(msg)-barWidth:])
 			return err
 		}
 		// Pad with spaces to fill the bar

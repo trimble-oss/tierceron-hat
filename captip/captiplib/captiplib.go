@@ -331,6 +331,15 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 						goto perching
 					}
 
+					if err == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
+						_, resyncErr := cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_GAZE), sessionIdBinary, true)
+						if resyncErr != nil {
+							err = resyncErr
+							continue
+						}
+						ctlFlapMode = []byte{cap.MODE_GAZE}
+					}
+
 					if err == nil && flapMode[0] != ctlFlapMode[0] {
 						// Flap, Gaze, etc...
 						err := interruptFun(featherCtx, featherCtx.TwoHundredMilliInterruptTicker)

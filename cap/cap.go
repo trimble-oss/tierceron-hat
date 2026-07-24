@@ -371,7 +371,9 @@ func newFeatherQUICConfig() *quic.Config {
 }
 
 func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) {
-	quicConn, err := quic.DialAddr(context.Background(), addr, clientTLSConfig, newFeatherQUICConfig())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	quicConn, err := quic.DialAddr(ctx, addr, clientTLSConfig, newFeatherQUICConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +381,9 @@ func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) 
 }
 
 func openQUICStream(quicConn *quic.Conn) (net.Conn, error) {
-	stream, err := quicConn.OpenStreamSync(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := quicConn.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +722,10 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 								penseFeatherCtlCodeMap.Set(activity, ctl)
 								msg = string(MODE_PERCH)
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_FLAP: // Flap
-								if msg[0] == MODE_GAZE || msg[0] == MODE_FLAP { // Preserve payload-bearing flaps once the session is active.
+								if msg[0] == MODE_GLIDE && bytes.HasSuffix([]byte(msg), CTL_COMPLETE_BYTES) {
+									msg = string(MODE_GAZE)
+									penseFeatherCtlCodeMap.Set(activity, msg)
+								} else if msg[0] == MODE_GAZE || msg[0] == MODE_FLAP { // Preserve payload-bearing flaps once the session is active.
 									penseFeatherCtlCodeMap.Set(activity, ctl)
 								}
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GAZE: // Gaze
