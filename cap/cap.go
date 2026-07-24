@@ -95,6 +95,7 @@ type FeatherTLSConfig struct {
 	ListenerCertPEM *[]byte
 	ListenerKeyPEM  *[]byte
 	RootCertPEM     *[]byte
+	ServerName      *string
 }
 
 func NewFeatherSelfSignedTLSConfig() *FeatherTLSConfig {
@@ -128,6 +129,7 @@ type featherTLSCacheKey struct {
 	listenerCertHash string
 	listenerKeyHash  string
 	rootCertHash     string
+	serverName       string
 }
 
 type featherTLSCacheValue struct {
@@ -236,7 +238,10 @@ func newDeterministicReader(encryptPass, encryptSalt string) *deterministicReade
 	return &deterministicReader{seed: seed}
 }
 
-func buildQUICCertificate(encryptPass, encryptSalt string) (tls.Certificate, *x509.Certificate, error) {
+func buildQUICCertificate(encryptPass, encryptSalt string, serverName string) (tls.Certificate, *x509.Certificate, error) {
+	if len(serverName) == 0 {
+		serverName = featherQUICServerName
+	}
 	seed := pbkdf2.Key([]byte(encryptPass), []byte("feather-quic-cert:"+encryptSalt), 4096, ed25519.SeedSize, sha256.New)
 	privateKey := ed25519.NewKeyFromSeed(seed)
 
@@ -249,9 +254,9 @@ func buildQUICCertificate(encryptPass, encryptSalt string) (tls.Certificate, *x5
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName: featherQUICServerName,
+			CommonName: serverName,
 		},
-		DNSNames:              []string{featherQUICServerName},
+		DNSNames:              []string{serverName},
 		NotBefore:             time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
 		NotAfter:              time.Date(2044, time.January, 1, 0, 0, 0, 0, time.UTC),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
@@ -294,6 +299,9 @@ func newFeatherTLSCacheKey(encryptPass, encryptSalt string, tlsConfig *FeatherTL
 		cacheKey.listenerCertHash = hashTLSBytes(tlsConfig.ListenerCertPEM)
 		cacheKey.listenerKeyHash = hashTLSBytes(tlsConfig.ListenerKeyPEM)
 		cacheKey.rootCertHash = hashTLSBytes(tlsConfig.RootCertPEM)
+		if tlsConfig.ServerName != nil {
+			cacheKey.serverName = *tlsConfig.ServerName
+		}
 	}
 	return cacheKey
 }
@@ -322,6 +330,10 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 	}
 
 	allowSelfSigned := tlsConfig == nil || tlsConfig.AllowSelfSigned
+	serverName := featherQUICServerName
+	if tlsConfig != nil && tlsConfig.ServerName != nil && len(*tlsConfig.ServerName) > 0 {
+		serverName = *tlsConfig.ServerName
+	}
 	var tlsCertificate tls.Certificate
 	var leaf *x509.Certificate
 	var err error
@@ -331,7 +343,7 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 		}
 		tlsCertificate, leaf, err = loadQUICCertificate(*tlsConfig.ListenerCertPEM, *tlsConfig.ListenerKeyPEM)
 	} else {
-		tlsCertificate, leaf, err = buildQUICCertificate(encryptPass, encryptSalt)
+		tlsCertificate, leaf, err = buildQUICCertificate(encryptPass, encryptSalt, serverName)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -359,7 +371,7 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 	}
 	clientTLSConfig := &tls.Config{
 		RootCAs:    rootCAs,
-		ServerName: featherQUICServerName,
+		ServerName: serverName,
 		MinVersion: tls.VersionTLS13,
 		NextProtos: []string{featherQUICALPN},
 	}
