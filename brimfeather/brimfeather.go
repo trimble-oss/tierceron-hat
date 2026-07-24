@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -13,9 +14,19 @@ import (
 
 	"github.com/trimble-oss/tierceron-hat/cap"
 	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
+	"github.com/trimble-oss/tierceron-hat/localcert"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
+
+func loadLocalFeatherTLSConfig(serverName string) (*cap.FeatherTLSConfig, error) {
+	return localcert.LoadFeatherTLSConfig(
+		[]string{"./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		[]string{"./servicekey.key", "./local_config/servicekey.key", "../servicekey.key", "../local_config/servicekey.key", "./serv_key.pem", "../serv_key.pem"},
+		[]string{"./serviceclientcert.pem", "./local_config/serviceclientcert.pem", "../serviceclientcert.pem", "../local_config/serviceclientcert.pem", "./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		serverName,
+	)
+}
 
 var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough", "the", "e", "lo", "o", "vly", "y", "wo", "ods", "I", "i", "wa", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "an", "der", "through", "the", "woods."}
 
@@ -110,6 +121,9 @@ rerun:
 }
 
 func main() {
+	featherServerName := flag.String("fsn", "", "TLS server name covered by the local feather certificate")
+	flag.Parse()
+
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
 
@@ -120,7 +134,11 @@ func main() {
 	handshakeCode := "ThisIsACode"
 	sessionIdentifier := "FeatherSessionOne"
 	env := "SomeEnv"
-	tlsConfig := cap.NewFeatherSelfSignedTLSConfig()
+	tlsConfig, err := loadLocalFeatherTLSConfig(*featherServerName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// Initialize mpb container for graceful multi-line output
 	mpbContainer = mpb.New()

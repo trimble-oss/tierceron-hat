@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,7 +11,17 @@ import (
 
 	"github.com/trimble-oss/tierceron-hat/cap"
 	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
+	"github.com/trimble-oss/tierceron-hat/localcert"
 )
+
+func loadLocalFeatherTLSConfig(serverName string) (*cap.FeatherTLSConfig, error) {
+	return localcert.LoadFeatherTLSConfig(
+		[]string{"./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		[]string{"./servicekey.key", "./local_config/servicekey.key", "../servicekey.key", "../local_config/servicekey.key", "./serv_key.pem", "../serv_key.pem"},
+		[]string{"./serviceclientcert.pem", "./local_config/serviceclientcert.pem", "../serviceclientcert.pem", "../local_config/serviceclientcert.pem", "./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		serverName,
+	)
+}
 
 func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
 	msgLower := strings.ToLower(msg)
@@ -21,14 +32,17 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
-	cap.FeatherCtlEmit(featherCtx, string(cap.MODE_PERCH), *featherCtx.SessionIdentifier, true)
-	os.Exit(-1)
+	os.Exit(130)
 	return nil
 }
 
 func main() {
+	featherServerName := flag.String("fsn", "", "TLS server name covered by the local feather certificate")
+	flag.Parse()
+
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
+	var controlInterruptChan chan os.Signal = make(chan os.Signal, 1)
 
 	localHostAddr := ""
 	encryptPass := "Som18vhjqa72935h"
@@ -37,9 +51,13 @@ func main() {
 	handshakeCode := "ThisIsACode"
 	sessionIdentifier := "FeatherSessionOne"
 	env := "SomeEnv"
-	tlsConfig := cap.NewFeatherSelfSignedTLSConfig()
+	tlsConfig, err := loadLocalFeatherTLSConfig(*featherServerName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemote, interrupted)
+	featherCtx := captiplib.FeatherCtlInit(controlInterruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemote, interrupted)
 
 	done := make(chan struct{})
 	go func() {

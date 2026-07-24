@@ -101,9 +101,7 @@ type FeatherTLSConfig struct {
 func NewFeatherSelfSignedTLSConfig() *FeatherTLSConfig {
 	serverName := featherQUICServerName
 	return &FeatherTLSConfig{
-		ListenerCertPEM: &featherLocalListenerCertPEM,
-		ListenerKeyPEM:  &featherLocalListenerKeyPEM,
-		RootCertPEM:     &featherLocalListenerCertPEM,
+		AllowSelfSigned: true,
 		ServerName:      &serverName,
 	}
 }

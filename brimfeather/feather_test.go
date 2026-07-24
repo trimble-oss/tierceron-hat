@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"net"
 	"os"
 	"sync"
@@ -9,7 +10,19 @@ import (
 
 	cap2 "github.com/trimble-oss/tierceron-hat/cap"
 	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
+	"github.com/trimble-oss/tierceron-hat/localcert"
 )
+
+var featherServerName = flag.String("fsn", "", "TLS server name covered by the local feather certificate")
+
+func loadLocalFeatherTLSConfig(serverName string) (*cap2.FeatherTLSConfig, error) {
+	return localcert.LoadFeatherTLSConfig(
+		[]string{"./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		[]string{"./servicekey.key", "./local_config/servicekey.key", "../servicekey.key", "../local_config/servicekey.key", "./serv_key.pem", "../serv_key.pem"},
+		[]string{"./serviceclientcert.pem", "./local_config/serviceclientcert.pem", "../serviceclientcert.pem", "../local_config/serviceclientcert.pem", "./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		serverName,
+	)
+}
 
 func featherInterrupted(featherCtx *cap2.FeatherContext) error {
 	cap2.FeatherCtlEmit(featherCtx, string(cap2.MODE_PERCH), *featherCtx.SessionIdentifier, true)
@@ -19,7 +32,10 @@ func featherInterrupted(featherCtx *cap2.FeatherContext) error {
 
 func TestGetSaltyGuardian(t *testing.T) {
 	cap2.TapInitCodeSaltGuard(func() string { return "ExtraSaltPlease" })
-	tlsConfig := cap2.NewFeatherSelfSignedTLSConfig()
+	tlsConfig, err := loadLocalFeatherTLSConfig(*featherServerName)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var serverStart sync.WaitGroup
 	serverStart.Add(1)
