@@ -113,7 +113,7 @@ func main() {
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
 
-	localHostAddr := "127.0.0.1:1832"
+	localHostAddr := "127.0.0.1:1534"
 	encryptPass := "Som18vhjqa72935h"
 	encryptSalt := "1cx7v89as7df89"
 	hostAddr := "127.0.0.1:1832"

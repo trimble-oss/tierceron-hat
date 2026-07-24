@@ -3,7 +3,8 @@ package cap
 import (
 	"bytes"
 	context "context"
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
@@ -25,7 +26,6 @@ import (
 	"github.com/lafriks/go-shamir"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	quic "github.com/quic-go/quic-go"
-	"golang.org/x/crypto/pbkdf2"
 	grpc "google.golang.org/grpc"
 )
 
@@ -99,7 +99,13 @@ type FeatherTLSConfig struct {
 }
 
 func NewFeatherSelfSignedTLSConfig() *FeatherTLSConfig {
-	return &FeatherTLSConfig{AllowSelfSigned: true}
+	serverName := featherQUICServerName
+	return &FeatherTLSConfig{
+		ListenerCertPEM: &featherLocalListenerCertPEM,
+		ListenerKeyPEM:  &featherLocalListenerKeyPEM,
+		RootCertPEM:     &featherLocalListenerCertPEM,
+		ServerName:      &serverName,
+	}
 }
 
 func NewFeatherPEMTLSConfig(listenerCertPEM, listenerKeyPEM, rootCertPEM *[]byte) *FeatherTLSConfig {
@@ -162,40 +168,6 @@ func TapInitCodeSaltGuard(csgFn CodeSaltGuardFunc) {
 	CodeSaltGuardFn = csgFn
 }
 
-type deterministicReader struct {
-	seed    []byte
-	counter uint64
-	buf     []byte
-	pos     int
-}
-
-func (dr *deterministicReader) Read(p []byte) (int, error) {
-	total := 0
-	for total < len(p) {
-		if dr.pos == len(dr.buf) {
-			counterBytes := []byte{
-				byte(dr.counter >> 56),
-				byte(dr.counter >> 48),
-				byte(dr.counter >> 40),
-				byte(dr.counter >> 32),
-				byte(dr.counter >> 24),
-				byte(dr.counter >> 16),
-				byte(dr.counter >> 8),
-				byte(dr.counter),
-			}
-			hashInput := append(append([]byte{}, dr.seed...), counterBytes...)
-			hash := sha256.Sum256(hashInput)
-			dr.buf = hash[:]
-			dr.pos = 0
-			dr.counter++
-		}
-		n := copy(p[total:], dr.buf[dr.pos:])
-		total += n
-		dr.pos += n
-	}
-	return total, nil
-}
-
 type featherQUICStream struct {
 	conn   *quic.Conn
 	stream *quic.Stream
@@ -233,17 +205,14 @@ func (fqs *featherQUICStream) SetWriteDeadline(t time.Time) error {
 	return fqs.stream.SetWriteDeadline(t)
 }
 
-func newDeterministicReader(encryptPass, encryptSalt string) *deterministicReader {
-	seed := pbkdf2.Key([]byte(encryptPass), []byte("feather-quic:"+encryptSalt), 4096, 32, sha256.New)
-	return &deterministicReader{seed: seed}
-}
-
 func buildQUICCertificate(encryptPass, encryptSalt string, serverName string) (tls.Certificate, *x509.Certificate, error) {
 	if len(serverName) == 0 {
 		serverName = featherQUICServerName
 	}
-	seed := pbkdf2.Key([]byte(encryptPass), []byte("feather-quic-cert:"+encryptSalt), 4096, ed25519.SeedSize, sha256.New)
-	privateKey := ed25519.NewKeyFromSeed(seed)
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
 
 	serialHash := sha256.Sum256([]byte(encryptPass + ":" + encryptSalt + ":feather-cert"))
 	serialNumber := new(big.Int).SetBytes(serialHash[:])
@@ -257,9 +226,10 @@ func buildQUICCertificate(encryptPass, encryptSalt string, serverName string) (t
 			CommonName: serverName,
 		},
 		DNSNames:              []string{serverName},
+		SignatureAlgorithm:    x509.ECDSAWithSHA256,
 		NotBefore:             time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
 		NotAfter:              time.Date(2044, time.January, 1, 0, 0, 0, 0, time.UTC),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
@@ -348,6 +318,7 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 	if err != nil {
 		return nil, nil, err
 	}
+	expectedPeerCertificate := append([]byte{}, leaf.Raw...)
 	rootCAs := x509.NewCertPool()
 	switch {
 	case tlsConfig != nil && tlsConfig.RootCertPEM != nil && len(*tlsConfig.RootCertPEM) > 0:
@@ -374,6 +345,18 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 		ServerName: serverName,
 		MinVersion: tls.VersionTLS13,
 		NextProtos: []string{featherQUICALPN},
+	}
+	if allowSelfSigned {
+		clientTLSConfig.InsecureSkipVerify = true
+		clientTLSConfig.VerifyConnection = func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) != 1 {
+				return errors.New("unexpected QUIC peer certificate chain")
+			}
+			if !bytes.Equal(state.PeerCertificates[0].Raw, expectedPeerCertificate) {
+				return errors.New("unexpected QUIC peer certificate")
+			}
+			return nil
+		}
 	}
 
 	featherTLSCache.Store(cacheKey, featherTLSCacheValue{server: serverTLSConfig, client: clientTLSConfig})
