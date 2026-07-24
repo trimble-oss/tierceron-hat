@@ -37,8 +37,9 @@ func main() {
 	handshakeCode := "ThisIsACode"
 	sessionIdentifier := "FeatherSessionOne"
 	env := "SomeEnv"
+	tlsConfig := cap.NewFeatherSelfSignedTLSConfig()
 
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, captiplib.AcceptRemote, interrupted)
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemote, interrupted)
 
 	done := make(chan struct{})
 	go func() {

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"net"
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	cap2 "github.com/trimble-oss/tierceron-hat/cap"
 	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
@@ -17,11 +19,12 @@ func featherInterrupted(featherCtx *cap2.FeatherContext) error {
 
 func TestGetSaltyGuardian(t *testing.T) {
 	cap2.TapInitCodeSaltGuard(func() string { return "ExtraSaltPlease" })
+	tlsConfig := cap2.NewFeatherSelfSignedTLSConfig()
 
 	var serverStart sync.WaitGroup
 	serverStart.Add(1)
 	go func() {
-		go cap2.Feather("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", func(int, string) bool { return true })
+		go cap2.FeatherWithTLS("Som18vhjqa72935h", "1cx7v89as7df89", "127.0.0.1:1832", "ThisIsACode", tlsConfig, func(int, string) bool { return true })
 
 		keyvar := new(string)
 		*keyvar = "therefore I am."
@@ -40,6 +43,18 @@ func TestGetSaltyGuardian(t *testing.T) {
 	}()
 
 	serverStart.Wait()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:1534", 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tap server did not start listening: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	localHostAddr := "localhost:1534"
 	encryptPass := "Som18vhjqa72935h"
 	encryptSalt := "1cx7v89as7df89"
@@ -49,7 +64,7 @@ func TestGetSaltyGuardian(t *testing.T) {
 	env := "SomeEnv"
 
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
-	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, captiplib.AcceptRemote, featherInterrupted)
+	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemote, featherInterrupted)
 
 	expected := "therefore I am."
 	msg, err := captiplib.FeatherQueryCache(featherCtx, "I think")
