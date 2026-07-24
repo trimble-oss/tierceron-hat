@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -13,9 +14,19 @@ import (
 
 	"github.com/trimble-oss/tierceron-hat/cap"
 	captiplib "github.com/trimble-oss/tierceron-hat/captip/captiplib"
+	"github.com/trimble-oss/tierceron-hat/localcert"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
+
+func loadLocalFeatherTLSConfig(serverName string) (*cap.FeatherTLSConfig, error) {
+	return localcert.LoadFeatherTLSConfig(
+		[]string{"./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		[]string{"./servicekey.key", "./local_config/servicekey.key", "../servicekey.key", "../local_config/servicekey.key", "./serv_key.pem", "../serv_key.pem"},
+		[]string{"./serviceclientcert.pem", "./local_config/serviceclientcert.pem", "../serviceclientcert.pem", "../local_config/serviceclientcert.pem", "./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
+		serverName,
+	)
+}
 
 var modeCtlTrail []string = []string{"I", "wa", "a", "nde", "er", "thro", "ough", "the", "e", "lo", "o", "vly", "y", "wo", "ods", "I", "i", "wa", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "a", "an", "der", "through", "the", "woods."}
 
@@ -38,8 +49,8 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 		return
 	}
 
+	var bar *mpb.Bar
 	outputMutex.Lock()
-	defer outputMutex.Unlock()
 
 	// Append message to the accumulating buffer
 	if *featherCtx.SessionIdentifier == "FeatherSessionOne" {
@@ -48,14 +59,19 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 		if len(messageOneBuffer) > 500 {
 			messageOneBuffer = messageOneBuffer[len(messageOneBuffer)-500:]
 		}
-		barOne.Increment()
+		bar = barOne
 	} else {
 		messageTwoBuffer += msg + " "
 		// Keep buffer size reasonable (truncate to last 500 chars if too long)
 		if len(messageTwoBuffer) > 500 {
 			messageTwoBuffer = messageTwoBuffer[len(messageTwoBuffer)-500:]
 		}
-		barTwo.Increment()
+		bar = barTwo
+	}
+	outputMutex.Unlock()
+
+	if bar != nil {
+		bar.Increment()
 	}
 }
 
@@ -110,17 +126,24 @@ rerun:
 }
 
 func main() {
+	featherServerName := flag.String("fsn", "", "TLS server name covered by the local feather certificate")
+	flag.Parse()
+
 	var interruptChan chan os.Signal = make(chan os.Signal, 5)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGALRM)
 
-	localHostAddr := "127.0.0.1:1832"
+	localHostAddr := "127.0.0.1:1534"
 	encryptPass := "Som18vhjqa72935h"
 	encryptSalt := "1cx7v89as7df89"
 	hostAddr := "127.0.0.1:1832"
 	handshakeCode := "ThisIsACode"
 	sessionIdentifier := "FeatherSessionOne"
 	env := "SomeEnv"
-	tlsConfig := cap.NewFeatherSelfSignedTLSConfig()
+	tlsConfig, err := loadLocalFeatherTLSConfig(*featherServerName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// Initialize mpb container for graceful multi-line output
 	mpbContainer = mpb.New()
@@ -134,7 +157,7 @@ func main() {
 		// Write message up to the bar width, then pad with spaces
 		barWidth := int(st.Total) - 5 // Account for brackets and prefix
 		if len(msg) >= barWidth {
-			_, err := fmt.Fprint(w, msg[:barWidth])
+			_, err := fmt.Fprint(w, msg[len(msg)-barWidth:])
 			return err
 		}
 		// Pad with spaces to fill the bar
@@ -150,7 +173,7 @@ func main() {
 		// Write message up to the bar width, then pad with spaces
 		barWidth := int(st.Total) - 5 // Account for brackets and prefix
 		if len(msg) >= barWidth {
-			_, err := fmt.Fprint(w, msg[:barWidth])
+			_, err := fmt.Fprint(w, msg[len(msg)-barWidth:])
 			return err
 		}
 		// Pad with spaces to fill the bar

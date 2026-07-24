@@ -222,7 +222,9 @@ func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, er
 	penseCode := randomString(12 + rand.Intn(7))
 	penseArray := sha256.Sum256([]byte(penseCode))
 	penseSum := hex.EncodeToString(penseArray[:])
-	penseSum = penseSum + cap.CodeSaltGuardFn()
+	if cap.CodeSaltGuardFn != nil {
+		penseSum = penseSum + cap.CodeSaltGuardFn()
+	}
 
 	_, featherErr := cap.FeatherWriter(featherCtx, penseSum)
 	if featherErr != nil {
@@ -327,6 +329,15 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 						// Acknowledge perching...
 						cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_PERCH), sessionIdBinary, true)
 						goto perching
+					}
+
+					if err == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
+						_, resyncErr := cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_GAZE), sessionIdBinary, true)
+						if resyncErr != nil {
+							err = resyncErr
+							continue
+						}
+						ctlFlapMode = []byte{cap.MODE_GAZE}
 					}
 
 					if err == nil && flapMode[0] != ctlFlapMode[0] {

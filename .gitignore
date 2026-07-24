@@ -16,5 +16,12 @@
 #
 bin/
 
+serv_cert.pem
+serv_key.pem
+servicecert.crt
+servicekey.key
+serviceclientcert.pem
+local_config/
+
 .idea/
 .vscode/
