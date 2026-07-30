@@ -196,13 +196,11 @@ func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, er
 	defer conn.Close()
 
 	c := cap.NewCapClient(conn)
-	// Contact the server and print out its response.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-
 	var r *cap.PenseReply
 	retry := 0
 
 	for {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		_, err := c.Pense(ctx, &cap.PenseRequest{Pense: "", PenseIndex: ""})
 		cancel()
 		if err != nil {
@@ -234,7 +232,9 @@ func FeatherQueryCache(featherCtx *cap.FeatherContext, pense string) (string, er
 	retry = 0
 
 	for {
-		r, err = c.Pense(ctx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
+		penseCtx, penseCancel := context.WithTimeout(context.Background(), time.Second*30)
+		r, err = c.Pense(penseCtx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
+		penseCancel()
 		if err != nil {
 			st, ok := status.FromError(err)
 

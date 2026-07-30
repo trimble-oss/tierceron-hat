@@ -51,7 +51,7 @@ func penseQuery(pense string) {
 	retry := 0
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		_, err := c.Pense(ctx, &cap.PenseRequest{Pense: "", PenseIndex: ""})
 		cancel()
 		if err != nil {
@@ -77,7 +77,7 @@ func penseQuery(pense string) {
 	retry = 0
 
 	for {
-		penseCtx, penseCancel := context.WithTimeout(context.Background(), time.Second*5)
+		penseCtx, penseCancel := context.WithTimeout(context.Background(), time.Second*30)
 		r, err = c.Pense(penseCtx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
 		penseCancel()
 		if err != nil {
