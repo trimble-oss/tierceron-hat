@@ -46,14 +46,14 @@ func penseQuery(pense string) {
 	c := cap.NewCapClient(conn)
 
 	// Contact the server and print out its response.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
 
 	var r *cap.PenseReply
 	retry := 0
 
 	for {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		_, err := c.Pense(ctx, &cap.PenseRequest{Pense: "", PenseIndex: ""})
+		cancel()
 		if err != nil {
 			st, ok := status.FromError(err)
 
@@ -77,7 +77,9 @@ func penseQuery(pense string) {
 	retry = 0
 
 	for {
-		r, err = c.Pense(ctx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
+		penseCtx, penseCancel := context.WithTimeout(context.Background(), time.Second*5)
+		r, err = c.Pense(penseCtx, &cap.PenseRequest{Pense: penseCode, PenseIndex: pense})
+		penseCancel()
 		if err != nil {
 			st, ok := status.FromError(err)
 
