@@ -363,10 +363,11 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 
 func newFeatherQUICConfig() *quic.Config {
 	return &quic.Config{
-		HandshakeIdleTimeout: 20 * time.Second,
-		MaxIdleTimeout:       2 * time.Minute,
-		KeepAlivePeriod:      10 * time.Second,
-		MaxIncomingStreams:   128,
+		HandshakeIdleTimeout:    20 * time.Second,
+		MaxIdleTimeout:          2 * time.Minute,
+		KeepAlivePeriod:         10 * time.Second,
+		MaxIncomingStreams:      128,
+		DisablePathMTUDiscovery: true, // Needed for Windows
 	}
 }
 
