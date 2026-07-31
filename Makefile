@@ -24,6 +24,10 @@ brimfeather: */*.go
 	$(GO_VARS) GOFIPS140=certified $(GO) build -tags "fips" -o="$(ROOT)/bin/brimfeather" -ldflags="$(LD_FLAGS)" $(ROOT)/brimfeather/brimfeather.go
 	chmod 700 $(ROOT)/bin/brimfeather
 
+winbrimfeather: */*.go
+	$(GO_VARS) CGO_ENABLED=0 GOFIPS140=certified GOOS=windows GOARCH=amd64 $(GO) build -tags "fips" -o="$(ROOT)/bin/brimfeather.exe" -ldflags="$(LD_FLAGS)" $(ROOT)/brimfeather/brimfeather.go
+	chmod 700 $(ROOT)/bin/brimfeather.exe
+
 capfull: */*.go
 	$(GO_VARS) GOFIPS140=off GOARCH=wasm GOOS=js $(GO) build -tags "fips" -o="$(ROOT)/bin/capfull.wasm" -ldflags="$(LD_FLAGS)" $(ROOT)/capfull/capfull.go
 
