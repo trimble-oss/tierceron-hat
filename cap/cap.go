@@ -299,9 +299,6 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 
 	allowSelfSigned := tlsConfig == nil || tlsConfig.AllowSelfSigned
 	serverName := featherQUICServerName
-	if tlsConfig != nil && len(*tlsConfig.ServerName) > 0 {
-		serverName = *tlsConfig.ServerName
-	}
 	if tlsConfig != nil && tlsConfig.ServerName != nil && len(*tlsConfig.ServerName) > 0 {
 		serverName = *tlsConfig.ServerName
 	}
