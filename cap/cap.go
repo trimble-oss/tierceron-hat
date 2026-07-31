@@ -299,6 +299,9 @@ func getQUICTLSConfigs(encryptPass, encryptSalt string, tlsConfig *FeatherTLSCon
 
 	allowSelfSigned := tlsConfig == nil || tlsConfig.AllowSelfSigned
 	serverName := featherQUICServerName
+	if len(*tlsConfig.ServerName) > 0 {
+		serverName = *tlsConfig.ServerName
+	}
 	if tlsConfig != nil && tlsConfig.ServerName != nil && len(*tlsConfig.ServerName) > 0 {
 		serverName = *tlsConfig.ServerName
 	}
@@ -367,13 +370,17 @@ func newFeatherQUICConfig() *quic.Config {
 		MaxIdleTimeout:          2 * time.Minute,
 		KeepAlivePeriod:         10 * time.Second,
 		MaxIncomingStreams:      128,
+		InitialPacketSize:       1200, // Needed for Windows
 		DisablePathMTUDiscovery: true, // Needed for Windows
 	}
 }
 
 func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	quicConn, err := quic.DialAddr(ctx, addr, clientTLSConfig, newFeatherQUICConfig())
+	quicConn, err := quic.DialAddr(ctx,
+		addr,
+		clientTLSConfig,
+		newFeatherQUICConfig())
 	defer cancel()
 	if err != nil {
 		return nil, err
