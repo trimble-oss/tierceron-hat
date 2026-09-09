@@ -708,6 +708,7 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 					messageParts := bytesSplit(message, PROTOCOL_DELIM)
 					if bytes.HasPrefix([]byte(handshakeCode), messageParts[1]) && len(messageParts) == 4 {
 						// featherctl:handshakecode:f|p|g:activity
+						shouldCloseBootstrapConn := false
 						var msg string = ""
 						var ok bool
 						activity := string(messageParts[3])
@@ -741,9 +742,17 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 								}
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GLIDE: // Glide
 								penseFeatherCtlCodeMap.Set(activity, ctl)
+								if activity == "sessionIdDynamicFill" {
+									shouldCloseBootstrapConn = true
+								}
 							}
 						}
 						conn.Write([]byte(msg))
+						if shouldCloseBootstrapConn {
+							if quicStream, ok := conn.(*featherQUICStream); ok {
+								quicStream.conn.CloseWithError(0, "")
+							}
+						}
 						defer conn.Close()
 						return
 					}

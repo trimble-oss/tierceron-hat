@@ -15,7 +15,7 @@ import (
 
 var featherServerName = flag.String("fsn", "", "TLS server name covered by the local feather certificate")
 
-func loadLocalFeatherTLSConfig(serverName string) (*cap2.FeatherTLSConfig, error) {
+func testLoadLocalFeatherTLSConfig(serverName string) (*cap2.FeatherTLSConfig, error) {
 	return localcert.LoadFeatherTLSConfig(
 		[]string{"./servicecert.crt", "./local_config/servicecert.crt", "../servicecert.crt", "../local_config/servicecert.crt", "./serv_cert.pem", "../serv_cert.pem"},
 		[]string{"./servicekey.key", "./local_config/servicekey.key", "../servicekey.key", "../local_config/servicekey.key", "./serv_key.pem", "../serv_key.pem"},
@@ -32,7 +32,7 @@ func featherInterrupted(featherCtx *cap2.FeatherContext) error {
 
 func TestGetSaltyGuardian(t *testing.T) {
 	cap2.TapInitCodeSaltGuard(func() string { return "ExtraSaltPlease" })
-	tlsConfig, err := loadLocalFeatherTLSConfig(*featherServerName)
+	tlsConfig, err := testLoadLocalFeatherTLSConfig(*featherServerName)
 	if err != nil {
 		t.Fatal(err)
 	}
