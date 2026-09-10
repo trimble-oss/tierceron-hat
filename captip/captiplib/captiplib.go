@@ -104,6 +104,7 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 ) {
 	flapMode := string(cap.MODE_GAZE)
 	ctlFlapMode := flapMode
+	skipNextFlapEmit := false
 	var err error = errors.New("init")
 	bypass := err == nil || err.Error() != "init"
 	if emote == nil {
@@ -132,7 +133,11 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 						if ctl[1] == cap.CTL_COMPLETE {
 							break
 						}
-						emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s", ctl[1]))
+						if skipNextFlapEmit {
+							skipNextFlapEmit = false
+						} else {
+							emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s", ctl[1]))
+						}
 					}
 					callFlap = string(cap.MODE_GAZE)
 					gazeCnt = 0
@@ -174,6 +179,13 @@ func FeatherCtl(featherCtx *cap.FeatherContext,
 				}
 			}
 			ctlFlapMode, err = cap.FeatherCtlEmit(featherCtx, callFlap, *featherCtx.SessionIdentifier, bypass)
+			if err == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
+				ctl := strings.Split(ctlFlapMode, "_")
+				if len(ctl) > 1 && ctl[1] != cap.CTL_COMPLETE {
+					emote(featherCtx, ctlFlapMode, fmt.Sprintf("%s", ctl[1]))
+					skipNextFlapEmit = true
+				}
+			}
 		}
 	}
 }
@@ -258,7 +270,16 @@ const (
 	MSG_WAITING        = "\nWaiting...\n"
 	MSG_GLIDING        = "\nGliding....\n"
 	MSG_PERCH_AND_GAZE = "\nPerch and Gaze...\n"
+	MSG_ABORTING_CONN  = "aborting connection"
 )
+
+func ShouldIgnoreEmoteMessage(msg string) bool {
+	msgLower := strings.ToLower(msg)
+	return strings.Contains(msgLower, strings.ToLower(strings.TrimSpace(MSG_WAITING))) ||
+		strings.Contains(msgLower, strings.ToLower(strings.TrimSpace(MSG_PERCH_AND_GAZE))) ||
+		strings.Contains(msgLower, strings.ToLower(MSG_ABORTING_CONN)) ||
+		strings.Contains(msgLower, strings.ToLower(strings.TrimSpace(MSG_FLY_AWAY)))
+}
 
 func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan string,
 	emote func(*cap.FeatherContext, []byte, string),
@@ -332,12 +353,23 @@ func FeatherCtlEmitter(featherCtx *cap.FeatherContext, modeCtlTrailChan chan str
 					}
 
 					if err == nil && len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
-						_, resyncErr := cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_GAZE), sessionIdBinary, true)
+						var resyncErr error
+						ctlFlapMode, resyncErr = cap.FeatherCtlEmitBinary(featherCtx, string(cap.MODE_ACK), sessionIdBinary, true)
 						if resyncErr != nil {
 							err = resyncErr
 							continue
 						}
-						ctlFlapMode = []byte{cap.MODE_GAZE}
+						if len(ctlFlapMode) > 0 && ctlFlapMode[0] == cap.MODE_FLAP {
+							err := interruptFun(featherCtx, featherCtx.TwoHundredMilliInterruptTicker)
+							if err != nil {
+								if featherCtx.InterruptHandlerFunc != nil {
+									featherCtx.InterruptHandlerFunc(featherCtx)
+								} else {
+									os.Exit(-1)
+								}
+							}
+							continue
+						}
 					}
 
 					if err == nil && flapMode[0] != ctlFlapMode[0] {

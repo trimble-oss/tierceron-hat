@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -43,9 +42,7 @@ var (
 )
 
 func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
-	// Filter out control and status messages using case-insensitive contains checks
-	msgLower := strings.ToLower(msg)
-	if strings.Contains(msgLower, "waiting") || strings.Contains(msgLower, "perch and gaze") || strings.Contains(msgLower, "aborting connection") || strings.Contains(msgLower, "fly away") {
+	if captiplib.ShouldIgnoreEmoteMessage(msg) {
 		return
 	}
 
@@ -76,6 +73,7 @@ func emote(featherCtx *cap.FeatherContext, ctlFlapMode []byte, msg string) {
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
+	featherCtx.CloseQUICConnections()
 	os.Exit(-1)
 	return nil
 }
@@ -195,12 +193,14 @@ func main() {
 		}))
 
 	featherCtx := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemoteNoTimeout, interrupted)
+	defer featherCtx.CloseQUICConnections()
 
 	go brimFeatherer(featherCtx)
 
 	sessionIdentifierTwo := "FeatherSessionTwo"
 
 	featherCtxTwo := captiplib.FeatherCtlInit(interruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifierTwo, &env, tlsConfig, captiplib.AcceptRemoteNoTimeout, interrupted)
+	defer featherCtxTwo.CloseQUICConnections()
 
 	go brimFeatherer(featherCtxTwo)
 
