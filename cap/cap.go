@@ -742,7 +742,7 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 								}
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GLIDE: // Glide
 								penseFeatherCtlCodeMap.Set(activity, ctl)
-								if activity == "sessionIdDynamicFill" {
+								if activity == "sessionIdDynamicFill" || bytes.HasSuffix(messageParts[2], CTL_COMPLETE_BYTES) {
 									shouldCloseBootstrapConn = true
 								}
 							}
