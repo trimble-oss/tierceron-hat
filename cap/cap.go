@@ -42,6 +42,7 @@ var (
 	MODE_FLAP  byte = 'p'
 	MODE_GLIDE byte = 'g'
 	MODE_GAZE  byte = 'z'
+	MODE_ACK   byte = 'a'
 
 	PROTOCOL_DELIM byte = ':'
 )
@@ -122,8 +123,9 @@ var (
 )
 
 var (
-	penseFeatherPluckMap   = cmap.New[bool]()
-	penseFeatherCtlCodeMap = cmap.New[string]()
+	penseFeatherPluckMap    = cmap.New[bool]()
+	penseFeatherCtlCodeMap  = cmap.New[string]()
+	penseFeatherCtlOwnerMap = cmap.New[string]()
 )
 
 type featherTLSCacheKey struct {
@@ -167,8 +169,9 @@ func TapInitCodeSaltGuard(csgFn CodeSaltGuardFunc) {
 }
 
 type featherQUICStream struct {
-	conn   *quic.Conn
-	stream *quic.Stream
+	conn                *quic.Conn
+	stream              *quic.Stream
+	closeConnWithStream bool
 }
 
 func (fqs *featherQUICStream) Read(p []byte) (int, error) {
@@ -180,7 +183,12 @@ func (fqs *featherQUICStream) Write(p []byte) (int, error) {
 }
 
 func (fqs *featherQUICStream) Close() error {
-	return fqs.stream.Close()
+	fqs.stream.CancelRead(0)
+	err := fqs.stream.Close()
+	if fqs.closeConnWithStream {
+		return fqs.conn.CloseWithError(0, "")
+	}
+	return err
 }
 
 func (fqs *featherQUICStream) LocalAddr() net.Addr {
@@ -201,6 +209,22 @@ func (fqs *featherQUICStream) SetReadDeadline(t time.Time) error {
 
 func (fqs *featherQUICStream) SetWriteDeadline(t time.Time) error {
 	return fqs.stream.SetWriteDeadline(t)
+}
+
+func (featherCtx *FeatherContext) CloseQUICConnections() {
+	featherCtx.controlConnMu.Lock()
+	if featherCtx.controlConn != nil {
+		featherCtx.controlConn.CloseWithError(0, "")
+		featherCtx.controlConn = nil
+	}
+	featherCtx.controlConnMu.Unlock()
+
+	featherCtx.dataConnMu.Lock()
+	if featherCtx.dataConn != nil {
+		featherCtx.dataConn.CloseWithError(0, "")
+		featherCtx.dataConn = nil
+	}
+	featherCtx.dataConnMu.Unlock()
 }
 
 func buildQUICCertificate(encryptPass, encryptSalt string, serverName string) (tls.Certificate, *x509.Certificate, error) {
@@ -372,6 +396,12 @@ func newFeatherQUICConfig() *quic.Config {
 	}
 }
 
+func newFeatherQUICServerConfig() *quic.Config {
+	config := newFeatherQUICConfig()
+	config.KeepAlivePeriod = 0
+	return config
+}
+
 func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	quicConn, err := quic.DialAddr(ctx,
@@ -407,6 +437,7 @@ func dialQUIC(addr string, clientTLSConfig *tls.Config) (net.Conn, error) {
 		quicConn.CloseWithError(0, "")
 		return nil, err
 	}
+	streamConn.(*featherQUICStream).closeConnWithStream = true
 
 	return streamConn, nil
 }
@@ -499,6 +530,17 @@ func isTimeoutErr(err error) bool {
 	}
 	return strings.Contains(err.Error(), "timeout")
 }
+
+// Use in troubleshooting.
+// func traceSlowFeatherOperation(operation string, start time.Time, err error) {
+// 	if os.Getenv("FEATHER_TRACE_TIMING") == "" {
+// 		return
+// 	}
+// 	duration := time.Since(start)
+// 	if duration > 3*time.Second {
+// 		log.Printf("feather timing: %s took %s: %v", operation, duration.Round(time.Millisecond), err)
+// 	}
+// }
 
 func TapServer(address string, opt ...grpc.ServerOption) {
 	lis, err := net.Listen("tcp", address)
@@ -719,29 +761,47 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 						}
 
 						if len(messageParts[3]) < 20 && len(messageParts[2]) < 100 {
-
-							if len(messageParts[2]) > 0 && messageParts[2][0] != MODE_PERCH && messageParts[2][0] != MODE_FLAP {
-								penseFeatherPluckMap.Set(activity, true)
-							}
 							switch {
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_PERCH: // Perch
 								penseFeatherCtlCodeMap.Set(activity, ctl)
+								penseFeatherCtlOwnerMap.Remove(activity)
 								msg = string(MODE_PERCH)
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_FLAP: // Flap
 								if msg[0] == MODE_GLIDE && bytes.HasSuffix([]byte(msg), CTL_COMPLETE_BYTES) {
-									msg = string(MODE_GAZE)
-									penseFeatherCtlCodeMap.Set(activity, msg)
+									msg = string(MODE_PERCH)
 								} else if msg[0] == MODE_GAZE || msg[0] == MODE_FLAP { // Preserve payload-bearing flaps once the session is active.
 									penseFeatherCtlCodeMap.Set(activity, ctl)
+									if strings.Contains(ctl, "_") {
+										penseFeatherCtlOwnerMap.Set(activity, conn.RemoteAddr().String())
+										msg = ctl
+									} else {
+										penseFeatherCtlOwnerMap.Remove(activity)
+										msg = string(MODE_GAZE)
+									}
 								}
+							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_ACK: // Sender acknowledgement poll
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GAZE: // Gaze
 								if msg[0] != MODE_GLIDE { // Gliding to perch...
+									penseFeatherPluckMap.Set(activity, true)
 									penseFeatherCtlCodeMap.Set(activity, ctl)
+									penseFeatherCtlOwnerMap.Remove(activity)
 								} else {
-									penseFeatherCtlCodeMap.Set(activity, string(MODE_PERCH))
+									penseFeatherCtlCodeMap.Remove(activity)
+									penseFeatherPluckMap.Remove(activity)
 								}
 							case len(messageParts[2]) > 0 && messageParts[2][0] == MODE_GLIDE: // Glide
-								penseFeatherCtlCodeMap.Set(activity, ctl)
+								if bytes.HasSuffix([]byte(ctl), CTL_COMPLETE_BYTES) {
+									if _, hasOwner := penseFeatherCtlOwnerMap.Get(activity); ok || !hasOwner {
+										penseFeatherCtlCodeMap.Set(activity, ctl)
+										penseFeatherCtlOwnerMap.Set(activity, conn.RemoteAddr().String())
+									} else {
+										penseFeatherCtlOwnerMap.Remove(activity)
+										msg = string(MODE_PERCH)
+									}
+								} else {
+									penseFeatherCtlCodeMap.Set(activity, ctl)
+									penseFeatherCtlOwnerMap.Remove(activity)
+								}
 								if activity == "sessionIdDynamicFill" {
 									shouldCloseBootstrapConn = true
 								}
@@ -782,7 +842,7 @@ func FeatherWithTLS(encryptPass string, encryptSalt string, hostAddr string, han
 	}
 
 	go func() {
-		if pluckListener, err := quic.ListenAddr(hostAddr+"1", serverTLSConfig.Clone(), newFeatherQUICConfig()); err == nil {
+		if pluckListener, err := quic.ListenAddr(hostAddr+"1", serverTLSConfig.Clone(), newFeatherQUICServerConfig()); err == nil {
 			go func() {
 				<-featherDoneChan
 				pluckListener.Close()
@@ -808,7 +868,7 @@ func FeatherWithTLS(encryptPass string, encryptSalt string, hostAddr string, han
 			}
 		}
 	}()
-	if listener, err := quic.ListenAddr(hostAddr, serverTLSConfig.Clone(), newFeatherQUICConfig()); err == nil {
+	if listener, err := quic.ListenAddr(hostAddr, serverTLSConfig.Clone(), newFeatherQUICServerConfig()); err == nil {
 		go func() {
 			<-featherDoneChan
 			listener.Close()
@@ -839,7 +899,10 @@ func FeatherWithTLS(encryptPass string, encryptSalt string, hostAddr string, han
 }
 
 // Pluck is a blocking call
-func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (bool, error) {
+func PluckCtlEmit(featherCtx *FeatherContext, pense []byte) (breakImmediate bool, err error) {
+	//	start := time.Now()
+	//	defer func() { traceSlowFeatherOperation("pluck", start, err) }()
+
 	pluckPacket := []byte{MODE_PLUCK, PROTOCOL_DELIM}
 	pluckPacket = append(pluckPacket, pense...)
 	hostAddr := *featherCtx.HostAddr + "1"
@@ -936,7 +999,10 @@ retryEstablish:
 	}
 }
 
-func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense []byte, bypass bool) ([]byte, error) {
+func FeatherCtlEmitBinary(featherCtx *FeatherContext, modeCtlPack string, pense []byte, bypass bool) (response []byte, err error) {
+	//	start := time.Now()
+	//	defer func() { traceSlowFeatherOperation("control mode "+modeCtlPack[:1], start, err) }()
+
 	if !bypass && modeCtlPack[0] == MODE_FLAP {
 		if breakImmediate, accErr := PluckCtlEmit(featherCtx, pense); breakImmediate && accErr != nil {
 			return nil, accErr

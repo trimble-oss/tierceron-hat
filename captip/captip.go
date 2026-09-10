@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -24,14 +23,14 @@ func loadLocalFeatherTLSConfig(serverName string) (*cap.FeatherTLSConfig, error)
 }
 
 func emote(featherCtx *cap.FeatherContext, ctlFlapMode string, msg string) {
-	msgLower := strings.ToLower(msg)
-	if strings.Contains(msgLower, "waiting") || strings.Contains(msgLower, "perch and gaze") || strings.Contains(msgLower, "aborting connection") || strings.Contains(msgLower, "fly away") {
+	if captiplib.ShouldIgnoreEmoteMessage(msg) {
 		return
 	}
 	fmt.Print(msg)
 }
 
 func interrupted(featherCtx *cap.FeatherContext) error {
+	featherCtx.CloseQUICConnections()
 	os.Exit(130)
 	return nil
 }
@@ -58,6 +57,7 @@ func main() {
 	}
 
 	featherCtx := captiplib.FeatherCtlInit(controlInterruptChan, &localHostAddr, &encryptPass, &encryptSalt, &hostAddr, &handshakeCode, &sessionIdentifier, &env, tlsConfig, captiplib.AcceptRemote, interrupted)
+	defer featherCtx.CloseQUICConnections()
 
 	done := make(chan struct{})
 	go func() {
@@ -71,7 +71,10 @@ func main() {
 		close(done)
 	}()
 
-	<-interruptChan
-	interrupted(featherCtx)
-	<-done
+	select {
+	case <-done:
+		return
+	case <-interruptChan:
+		interrupted(featherCtx)
+	}
 }
