@@ -1,6 +1,6 @@
 module github.com/trimble-oss/tierceron-hat
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/lafriks/go-shamir v1.2.0
@@ -8,7 +8,7 @@ require (
 	github.com/quic-go/quic-go v0.61.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.2
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
