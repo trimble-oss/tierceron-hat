@@ -1,6 +1,8 @@
 package localcert
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"strings"
@@ -48,6 +50,34 @@ func LoadFeatherTLSConfig(listenerCertPaths []string, listenerKeyPaths []string,
 	}
 	if len(serverName) == 0 {
 		return nil, fmt.Errorf("local feather TLS server name not provided")
+	}
+
+	listenerKeyPair, err := tls.X509KeyPair(*listenerCertPEM, *listenerKeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("invalid local feather certificate/key pair: %w", err)
+	}
+	listenerCertificate, err := x509.ParseCertificate(listenerKeyPair.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid local feather certificate: %w", err)
+	}
+	rootCertPool := x509.NewCertPool()
+	if !rootCertPool.AppendCertsFromPEM(*rootCertPEM) {
+		return nil, fmt.Errorf("local feather root certificate bundle contains no valid certificates")
+	}
+	intermediateCertPool := x509.NewCertPool()
+	for _, certificateBytes := range listenerKeyPair.Certificate[1:] {
+		intermediateCertificate, err := x509.ParseCertificate(certificateBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid local feather intermediate certificate: %w", err)
+		}
+		intermediateCertPool.AddCert(intermediateCertificate)
+	}
+	if _, err := listenerCertificate.Verify(x509.VerifyOptions{
+		DNSName:       serverName,
+		Roots:         rootCertPool,
+		Intermediates: intermediateCertPool,
+	}); err != nil {
+		return nil, fmt.Errorf("local feather certificate validation failed: %w", err)
 	}
 
 	tlsConfig := cap.NewFeatherPEMTLSConfig(listenerCertPEM, listenerKeyPEM, rootCertPEM)
