@@ -12,10 +12,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"errors"
+	"hash/maphash"
 	"io"
 	"log"
 	"math/big"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -123,6 +125,7 @@ var (
 )
 
 var (
+	penseFeatherCtlMu       = sync.Mutex{}
 	penseFeatherPluckMap    = cmap.New[bool]()
 	penseFeatherCtlCodeMap  = cmap.New[string]()
 	penseFeatherCtlOwnerMap = cmap.New[string]()
@@ -410,6 +413,10 @@ func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) 
 		newFeatherQUICConfig())
 	defer cancel()
 	if err != nil {
+		var certErr x509.CertificateInvalidError
+		if errors.As(err, &certErr) && certErr.Reason == x509.Expired {
+			log.Fatalf("[feather] client dial failed addr=%s err=%v", addr, err)
+		}
 		return nil, err
 	}
 	return quicConn, nil
@@ -560,7 +567,12 @@ func TapServer(address string, opt ...grpc.ServerOption) {
 	}
 }
 
-var clientCodeMap = cmap.New[[]byte]()
+var (
+	clientCodeMapSeed = maphash.MakeSeed()
+	clientCodeMap     = cmap.NewWithCustomShardingFunction[netip.AddrPort, []byte](func(peer netip.AddrPort) uint32 {
+		return uint32(maphash.Comparable(clientCodeMapSeed, peer))
+	})
+)
 
 func encodeFeatherPayload(payload []byte) []byte {
 	framed := make([]byte, 2+len(payload))
@@ -693,23 +705,25 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 
 		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		n, err := conn.Read(buf)
-		if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
-			clientCodeMap.Set(conn.RemoteAddr().String(), []byte{})
+		remoteAddrPort := conn.RemoteAddr().(*net.UDPAddr).AddrPort()
+		remoteAddrPort = netip.AddrPortFrom(remoteAddrPort.Addr().Unmap(), remoteAddrPort.Port())
+		if _, ok := clientCodeMap.Get(remoteAddrPort); !ok {
+			clientCodeMap.Set(remoteAddrPort, []byte{})
 		}
 
 		if n == 0 || err != nil {
 			// All done... hopefully.
-			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
+			if _, ok := clientCodeMap.Get(remoteAddrPort); ok {
 				var messageBytes []byte
 				var err error = nil
-				if cremote, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok && len(cremote) > 0 {
+				if cremote, ok := clientCodeMap.Get(remoteAddrPort); ok && len(cremote) > 0 {
 					decodedPayloads := decodeFeatherPayloads(cremote)
 					if len(decodedPayloads) > 1 {
 						messageBytes, err = shamir.Combine(decodedPayloads...)
 					}
 				}
 				if err == nil {
-					clientCodeMap.Set(conn.RemoteAddr().String(), []byte{})
+					clientCodeMap.Set(remoteAddrPort, []byte{})
 					if acceptRemote(FEATHER_SECRET, conn.RemoteAddr().String()) {
 						message := string(messageBytes)
 						messageParts := strings.Split(message, string(PROTOCOL_DELIM))
@@ -740,8 +754,8 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 		} else {
 			// Update activity on successful read
 			lastActivityTime = time.Now()
-			if _, ok := clientCodeMap.Get(conn.RemoteAddr().String()); !ok {
-				clientCodeMap.Set(conn.RemoteAddr().String(), []byte{})
+			if _, ok := clientCodeMap.Get(remoteAddrPort); !ok {
+				clientCodeMap.Set(remoteAddrPort, []byte{})
 			}
 
 			if bytes.HasPrefix(buf[:n], PROTOCOL_HDR_BYTES) {
@@ -755,6 +769,7 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 						var ok bool
 						activity := string(messageParts[3])
 						ctl := string(messageParts[2])
+						penseFeatherCtlMu.Lock()
 						if msg, ok = penseFeatherCtlCodeMap.Get(activity); !ok {
 							// Default is Perch
 							msg = string(MODE_PERCH)
@@ -807,6 +822,7 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 								}
 							}
 						}
+						penseFeatherCtlMu.Unlock()
 						conn.Write([]byte(msg))
 						if shouldCloseBootstrapConn {
 							if quicStream, ok := conn.(*featherQUICStream); ok {
@@ -821,8 +837,8 @@ func handleMessage(handshakeCode string, conn net.Conn, acceptRemote func(int, s
 				defer conn.Close()
 				return
 			} else {
-				if ccmap, ok := clientCodeMap.Get(conn.RemoteAddr().String()); ok {
-					clientCodeMap.Set(conn.RemoteAddr().String(), append(ccmap, buf[:n]...))
+				if ccmap, ok := clientCodeMap.Get(remoteAddrPort); ok {
+					clientCodeMap.Set(remoteAddrPort, append(ccmap, buf[:n]...))
 				}
 				defer conn.Close()
 			}
