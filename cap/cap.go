@@ -413,10 +413,6 @@ func dialQUICConn(addr string, clientTLSConfig *tls.Config) (*quic.Conn, error) 
 		newFeatherQUICConfig())
 	defer cancel()
 	if err != nil {
-		var certErr x509.CertificateInvalidError
-		if errors.As(err, &certErr) && certErr.Reason == x509.Expired {
-			log.Printf("[feather] client dial failed addr=%s err=%v", addr, err)
-		}
 		return nil, err
 	}
 	return quicConn, nil
